@@ -3,6 +3,7 @@ use std::fs::OpenOptions;
 use std::io::{Read, Write};
 use anyhow::Error;
 use serde::{Deserialize, Serialize};
+use tracing::info;
 use crate::core::util;
 
 // 接口统一返回值
@@ -22,7 +23,8 @@ struct CommonResult {
     "name":"远行者长刃·辟路",
     "count":1,
     "time":"2024-07-05 07:40:58"
-} */
+}
+ */
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone, Default)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct GachaData {
@@ -116,7 +118,7 @@ pub(crate) async fn get_gacha_data() -> Result<SavedGachaData, Error> {
                 let mut gacha_data_by_type = vec![];
                 for gacha_data in body.data {
                     if saved_gacha_data_by_type.contains(&gacha_data) {
-                        println!("已经到达上次记录位置，停止记录");
+                        info!("已经到达上次记录位置，停止记录");
                         break;
                     }
 

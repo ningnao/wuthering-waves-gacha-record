@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
+use tracing::info;
 use crate::core::gacha::SavedGachaData;
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone, Default)]
@@ -70,5 +71,5 @@ pub(crate) fn gacha_statistics(gacha_data: SavedGachaData) {
         }
     }
 
-    println!("{:?}", statistics);
+    info!("{:?}", statistics);
 }

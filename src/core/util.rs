@@ -4,6 +4,7 @@ use std::io::Read;
 use anyhow::Error;
 use regex::Regex;
 use sysinfo::System;
+use tracing::info;
 use url::Url;
 use crate::core::gacha::RequestParam;
 
@@ -44,11 +45,11 @@ pub(crate) fn get_wuthering_waves_progress_path() -> anyhow::Result<String, Erro
 #[test]
 fn get_wuthering_waves_progress_path_test() {
     let path = get_wuthering_waves_progress_path().unwrap();
-    println!("{}", path);
+    info!("{}", path);
 }
 
 pub(crate) fn get_url_from_logfile(logfile_path: String) -> anyhow::Result<String, Error> {
-    println!("解析到的日志路径：{}", logfile_path);
+    info!("解析到的日志路径：{}", logfile_path);
     let mut file = OpenOptions::new()
         .read(true)
         .open(logfile_path)?;
@@ -104,5 +105,5 @@ fn get_request_param_test() {
     let url = "https://aki-gm-resources.aki-game.com/aki/gacha/index.html#/record?svr_id=***&player_id=***&lang=zh-Hans&gacha_id=100003&gacha_type=1&svr_area=cn&record_id=***&resources_id=***";
     let param = get_request_param(url.to_string());
 
-    println!("{:?}", param);
+    info!("{:?}", param);
 }
