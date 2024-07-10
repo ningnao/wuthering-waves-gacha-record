@@ -30,7 +30,7 @@ struct CommonResult {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct GachaData {
     card_pool_type: String,
-    resource_id: i32,
+    pub(crate) resource_id: i32,
     pub(crate) quality_level: i32,
     pub(crate) resource_type: String,
     pub(crate) name: String,

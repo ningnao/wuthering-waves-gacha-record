@@ -2,8 +2,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use eframe::Renderer::Wgpu;
-use eframe::Theme;
-
+use egui::{Style, Visuals};
 use crate::core::statistics::gacha_statistics;
 use crate::view::main_view::MainView;
 
@@ -24,13 +23,19 @@ async fn main() -> eframe::Result {
             .with_resizable(false)
             .with_maximize_button(false)
             .with_inner_size([900.0, 500.0]),
-        default_theme: Theme::Dark,
         renderer: Wgpu,
         ..Default::default()
     };
     eframe::run_native(
         "鸣潮抽卡记录工具",
         options,
-        Box::new(|cc| Ok(Box::new(MainView::new(cc)))),
+        Box::new(|cc| {
+            let style = Style {
+                visuals: Visuals::light(),
+                ..Style::default()
+            };
+            cc.egui_ctx.set_style(style);
+            Ok(Box::new(MainView::new(cc)))
+        }),
     )
 }

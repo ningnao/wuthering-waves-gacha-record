@@ -25,6 +25,7 @@ pub(crate) struct GachaStatisticsData {
 pub(crate) struct GachaStatisticsDataItem {
     pub(crate) name: String,
     pub(crate) count: i32,
+    pub(crate) resource_id: i32,
     pub(crate) resource_type: String,
 }
 
@@ -59,6 +60,7 @@ pub(crate) fn gacha_statistics(gacha_data: SavedGachaData) -> Result<GachaStatis
                     statistics_data.detail.push(GachaStatisticsDataItem {
                         name: item.name,
                         count: inner_count,
+                        resource_id: item.resource_id,
                         resource_type: item.resource_type,
                     });
 
