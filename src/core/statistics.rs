@@ -1,33 +1,37 @@
 use std::collections::BTreeMap;
+use std::fs;
+use std::fs::OpenOptions;
+use std::io::{Read, Write};
+use anyhow::Error;
 use serde::{Deserialize, Serialize};
 use tracing::info;
 use crate::core::gacha::SavedGachaData;
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone, Default)]
 #[serde(rename_all = "camelCase")]
-struct GachaStatisticsData {
-    card_pool_type: i32,
-    total: i32,
-    five_count: i32,
-    four_count: i32,
-    three_count: i32,
-    pull_count: i32,
-    detail: Vec<GachaStatisticsDataItem>,
+pub(crate) struct GachaStatisticsData {
+    pub(crate) card_pool_type: i32,
+    pub(crate) total: i32,
+    pub(crate) five_count: i32,
+    pub(crate) four_count: i32,
+    pub(crate) three_count: i32,
+    pub(crate) pull_count: i32,
+    pub(crate) detail: Vec<GachaStatisticsDataItem>,
 }
 
 // 抽卡统计详情
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone, Default)]
 #[serde(rename_all = "camelCase")]
-struct GachaStatisticsDataItem {
-    name: String,
-    count: i32,
-    resource_type: String,
+pub(crate) struct GachaStatisticsDataItem {
+    pub(crate) name: String,
+    pub(crate) count: i32,
+    pub(crate) resource_type: String,
 }
 
-type GachaStatistics = BTreeMap<i32, GachaStatisticsData>;
+pub(crate) type GachaStatistics = BTreeMap<i32, GachaStatisticsData>;
 
-pub(crate) fn gacha_statistics(gacha_data: SavedGachaData) {
-    let mut statistics = GachaStatistics::new();
+pub(crate) fn gacha_statistics(gacha_data: SavedGachaData) -> Result<GachaStatistics, Error> {
+    let mut statistics: GachaStatistics = GachaStatistics::new();
 
     for (card_pool_type, data) in gacha_data {
         let mut statistics_data = GachaStatisticsData {
@@ -72,4 +76,35 @@ pub(crate) fn gacha_statistics(gacha_data: SavedGachaData) {
     }
 
     info!("{:?}", statistics);
+    // 数据处理完毕后写入缓存文件
+    let _ = fs::create_dir_all("./data");
+    let file_path = String::from("data/gacha_statistic_cache.json");
+
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .open(&file_path)?;
+    file.write_all(&*serde_json::to_vec(&statistics)?)?;
+
+    Ok(statistics)
+}
+
+// 从缓存文件中获取统计数据
+pub(crate) fn gacha_statistics_from_cache() -> Result<GachaStatistics, Error> {
+    let _ = fs::create_dir_all("./data");
+    let file_path = String::from("./data/gacha_statistic_cache.json");
+
+    let mut file = OpenOptions::new()
+        .read(true)
+        .open(&file_path)?;
+    let mut buffer = String::new();
+    file.read_to_string(&mut buffer)?;
+
+    if buffer.is_empty() {
+        return Err(Error::msg("无缓存"));
+    }
+
+    let statistics = serde_json::from_str::<GachaStatistics>(&*buffer)?;
+    Ok(statistics)
 }

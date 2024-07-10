@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::fs;
 use std::fs::OpenOptions;
 use std::io::{Read, Write};
 use anyhow::Error;
@@ -76,7 +77,8 @@ pub(crate) async fn get_gacha_data() -> Result<SavedGachaData, Error> {
     // 从抽卡历史记录 url 中获取抽卡记录 API 所需要的请求参数
     let mut param = util::get_request_param(record_url)?;
 
-    let file_path = String::from(format!("/data/gacha_data_{}.json", param.player_id));
+    let _ = fs::create_dir_all("./data");
+    let file_path = String::from(format!("./data/gacha_data_{}.json", param.player_id));
 
     let mut file = OpenOptions::new()
         .read(true)
@@ -144,7 +146,7 @@ pub(crate) async fn get_gacha_data() -> Result<SavedGachaData, Error> {
         .truncate(true)
         .open(file_path)?;
 
-    let _ = &file.write_all(&*serde_json::to_vec(&saved_gacha_data)?);
+    let _ = &file.write_all(&*serde_json::to_vec(&saved_gacha_data)?)?;
 
     Ok(saved_gacha_data)
 }
