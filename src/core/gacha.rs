@@ -70,10 +70,8 @@ impl RequestParam {
 }
 
 pub(crate) async fn get_gacha_data() -> Result<SavedGachaData, Error> {
-    // 动态获取游戏目录及日志文件
-    let logfile_path = util::get_wuthering_waves_progress_path()?;
     // 从日志文件中获取抽卡历史记录 url
-    let record_url = util::get_url_from_logfile(logfile_path)?;
+    let record_url = util::get_url_from_logfile()?;
     // 从抽卡历史记录 url 中获取抽卡记录 API 所需要的请求参数
     let mut param = util::get_request_param(record_url)?;
 

@@ -8,7 +8,7 @@ use egui::{CentralPanel, FontData, FontId, TextStyle, Vec2};
 use egui::FontFamily::{Monospace, Proportional};
 use egui_plot::{Bar, BarChart, Legend, Plot};
 use tracing::{error, info};
-use crate::core::gacha::get_gacha_data;
+use crate::core::gacha::{get_gacha_data, SavedGachaData};
 use crate::core::statistics::{gacha_statistics_from_cache, GachaStatistics, GachaStatisticsDataItem};
 
 fn setup_custom_fonts(ctx: &egui::Context) {
@@ -75,13 +75,23 @@ impl MainView {
                         }
                     }
 
-                    if let Ok(gacha_data) = get_gacha_data().await {
-                        if let Ok(gacha_statistics_data) = gacha_statistics(gacha_data) {
-                            if let Ok(_) = tx.send(gacha_statistics_data) {
-                                info!("刷新统计图");
-                            } else {
-                                error!("数据传输失败！");
+                    match get_gacha_data().await {
+                        Ok(gacha_data) => {
+                            match gacha_statistics(gacha_data) {
+                                Ok(gacha_statistics_data) => {
+                                    if let Ok(_) = tx.send(gacha_statistics_data) {
+                                        info!("刷新统计图");
+                                    } else {
+                                        error!("数据传输失败！");
+                                    }
+                                }
+                                Err(err) => {
+                                    error!("抽卡数据统计失败：{}", err);
+                                }
                             }
+                        }
+                        Err(err) => {
+                            error!("获取抽卡数据失败：{}", err);
                         }
                     }
                 }

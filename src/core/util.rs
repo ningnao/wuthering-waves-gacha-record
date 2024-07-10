@@ -1,6 +1,7 @@
 use std::fs;
 use std::fs::OpenOptions;
-use std::io::Read;
+use std::io::{Read, Write};
+use std::time::SystemTime;
 use anyhow::Error;
 use regex::Regex;
 use sysinfo::System;
@@ -8,73 +9,126 @@ use tracing::info;
 use url::Url;
 use crate::core::gacha::RequestParam;
 
-pub(crate) fn get_wuthering_waves_progress_path() -> anyhow::Result<String, Error> {
+pub(crate) fn get_wuthering_waves_progress_path() -> anyhow::Result<Vec<String>, Error> {
     let mut system = System::new();
     system.refresh_all();
 
+    let mut log_path = String::new();
     // TODO 优化
     for process in system.processes_by_name("launcher.exe") {
         if let Some(path) = process.exe() {
             if let Some(path) = path.parent() {
                 if let Some(path) = path.to_str() {
-                    let path = path.to_owned() + r#"\Wuthering Waves Game\Client\Saved\Logs\Client.log"#;
+                    let path = path.to_owned() + r#"\Wuthering Waves Game\Client\Saved\Logs"#;
                     if fs::metadata(&path).is_ok() {
-                        return Ok(path.clone());
+                        log_path = path;
                     }
                 }
             }
         }
     }
 
-    for process in system.processes_by_name("Wuthering Waves.exe") {
-        if let Some(path) = process.exe() {
-            if let Some(path) = path.parent() {
-                if let Some(path) = path.to_str() {
-                    let path = path.to_owned() + r#"\Client\Saved\Logs\Client.log"#;
-                    if fs::metadata(&path).is_ok() {
-                        return Ok(path.clone());
+    if log_path.is_empty() {
+        for process in system.processes_by_name("Wuthering Waves.exe") {
+            if let Some(path) = process.exe() {
+                if let Some(path) = path.parent() {
+                    if let Some(path) = path.to_str() {
+                        let path = path.to_owned() + r#"\Client\Saved\Logs"#;
+                        if fs::metadata(&path).is_ok() {
+                            log_path = path;
+                        }
                     }
                 }
             }
         }
     }
 
-    Err(Error::msg("未找到游戏进程！"))
+    if log_path.is_empty() {
+        return Err(Error::msg("未找到游戏进程！"));
+    } else {
+        let mut path_metadata_vec = vec![];
+        let dir = fs::read_dir(&log_path)?;
+        for entry in dir.filter_map(Result::ok) {
+            if let Ok(metadata) = fs::metadata(entry.path()) {
+                if metadata.is_file() {
+                    let path = entry.path();
+                    let path = path.to_str().unwrap();
+                    path_metadata_vec.push((path.to_owned(), metadata.clone()));
+                }
+            }
+        }
+
+        // 按创建时间倒序排序
+        path_metadata_vec.sort_by(|(_, metadata_a), (_, metadata_b), | {
+            metadata_b
+                .modified()
+                .unwrap_or(SystemTime::UNIX_EPOCH)
+                .cmp(&metadata_a.modified().unwrap_or(SystemTime::UNIX_EPOCH))
+        });
+
+
+        let log_file_vec = path_metadata_vec
+            .iter()
+            .map(|(path, _)| { path.clone() })
+            .collect::<Vec<String>>();
+
+        Ok(log_file_vec)
+    }
 }
 
 #[test]
 fn get_wuthering_waves_progress_path_test() {
     let path = get_wuthering_waves_progress_path().unwrap();
-    info!("{}", path);
+    info!("{:?}", path);
 }
 
-pub(crate) fn get_url_from_logfile(logfile_path: String) -> anyhow::Result<String, Error> {
-    info!("解析到的日志路径：{}", logfile_path);
-    let mut file = OpenOptions::new()
-        .read(true)
-        .open(logfile_path)?;
-
-    let mut buffer = String::new();
-    file.read_to_string(&mut buffer)?;
-
-    let regex = Regex::new("https.*/aki/gacha/index.html#/record[?=&\\w\\-]+")?;
-    let url = regex.find_iter(&*buffer).last();
-    let url = match url {
-        Some(url) => {
-            url.as_str().to_string()
+pub(crate) fn get_url_from_logfile() -> anyhow::Result<String, Error> {
+    // 从配置文件中获取历史 url
+    let _ = fs::create_dir_all("./data");
+    if let Ok(mut file) = OpenOptions::new().read(true).open("./data/url_cache.txt") {
+        let mut buffer = String::new();
+        file.read_to_string(&mut buffer)?;
+        if !buffer.is_empty() {
+            return Ok(buffer);
         }
-        None => {
-            return Err(Error::msg("未打开过抽卡页面！"));
-        }
-    };
+    }
 
-    Ok(url)
+    let logfile_path_vec = get_wuthering_waves_progress_path()?;
+    info!("解析到的全部日志文件：{:?}", logfile_path_vec);
+
+    for logfile_path in logfile_path_vec {
+        info!("解析到的日志路径：{}", logfile_path);
+        let mut file = OpenOptions::new()
+            .read(true)
+            .open(logfile_path.clone())?;
+
+        let mut buffer = String::new();
+        file.read_to_string(&mut buffer)?;
+
+        let regex = Regex::new("https.*/aki/gacha/index.html#/record[?=&\\w\\-]+")?;
+        // 匹配最近的那个
+        let url = regex.find_iter(&*buffer).last();
+        if let Some(url) = url {
+            // 将获取到的抽卡页面 url 存入文件
+            let mut file = OpenOptions::new()
+                .write(true)
+                .create(true)
+                .truncate(true)
+                .open("./data/url_cache.txt")?;
+            file.write_all(url.as_str().as_bytes())?;
+
+            return Ok(url.as_str().to_string());
+        } else {
+            info!("日志内无目标 url：{}", logfile_path);
+        }
+    }
+
+    Err(Error::msg("未打开过抽卡页面！"))
 }
 
 #[test]
 fn get_url_from_logfile_test() {
-    let logfile_path = get_wuthering_waves_progress_path().unwrap();
-    get_url_from_logfile(logfile_path).unwrap();
+    get_url_from_logfile().unwrap();
 }
 
 // https://aki-gm-resources.aki-game.com/aki/gacha/index.html#/record?svr_id=***&player_id=***&lang=zh-Hans&gacha_id=100003&gacha_type=1&svr_area=cn&record_id=***&resources_id=***
