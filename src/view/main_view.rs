@@ -1,10 +1,10 @@
 use std::cmp::min;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, mpsc};
-use std::sync::mpsc::Receiver;
+use std::sync::mpsc;
+use std::sync::mpsc::{Receiver, Sender};
 use std::time::Duration;
+use eframe::epaint::Stroke;
 use crate::gacha_statistics;
-use egui::{CentralPanel, FontData, FontId, TextStyle, Vec2, Vec2b};
+use egui::{CentralPanel, Color32, FontData, FontId, TextStyle, Vec2, Vec2b, Visuals};
 use egui::FontFamily::{Monospace, Proportional};
 use egui_plot::{Bar, BarChart, Corner, Legend, Plot};
 use tracing::{error, info};
@@ -16,7 +16,7 @@ fn setup_custom_fonts(ctx: &egui::Context) {
     let mut fonts = egui::FontDefinitions::default();
 
     // 使用 得意黑 作为 UI 字体
-    fonts.font_data.insert("SmileySans".to_owned(), FontData::from_static(include_bytes!("../fonts/SmileySans-Oblique.otf")));
+    fonts.font_data.insert("SmileySans".to_owned(), FontData::from_static(include_bytes!("../resource/fonts/SmileySans-Oblique.otf")));
     // Install my own font (maybe supporting non-latin characters).
     // .ttf and .otf files supported.
     fonts.families.get_mut(&Proportional).unwrap().insert(0, "SmileySans".to_owned());
@@ -38,8 +38,9 @@ fn setup_custom_fonts(ctx: &egui::Context) {
 }
 
 pub(crate) struct MainView {
-    rx: Receiver<GachaStatistics>,
-    need_update: Arc<AtomicBool>,
+    dark_mode: bool,
+    update_flag_tx: Sender<bool>,
+    data_rx: Receiver<GachaStatistics>,
     gacha_statistics: GachaStatistics,
     gacha_statistic_view_vec: Vec<GachaStatisticsView>,
 }
@@ -48,22 +49,19 @@ impl MainView {
     pub(crate) fn new(cc: &eframe::CreationContext<'_>) -> Self {
         setup_custom_fonts(&cc.egui_ctx);
 
-        let (tx, rx) = mpsc::channel();
-
-        let need_update = Arc::new(AtomicBool::new(true));
-        let need_update_clone = Arc::clone(&need_update);
+        let (update_flag_tx, update_flag_rx) = mpsc::channel::<bool>();
+        let (data_tx, data_rx) = mpsc::channel();
 
         tokio::spawn(async move {
             let mut first_flag = true;
             loop {
-                if need_update_clone.load(Ordering::Relaxed) {
-                    need_update_clone.swap(false, Ordering::Relaxed);
+                if first_flag || update_flag_rx.recv_timeout(Duration::from_secs(1)).is_ok() {
                     if first_flag {
                         first_flag = false;
                         // 第一次加载时尝试读缓存文件中的统计内容，加快首屏加载速度
                         match gacha_statistics_from_cache() {
                             Ok(gacha_statistics_data) => {
-                                if let Ok(_) = tx.send(gacha_statistics_data) {
+                                if let Ok(_) = data_tx.send(gacha_statistics_data) {
                                     info!("刷新统计图");
                                 } else {
                                     error!("数据传输失败！");
@@ -80,7 +78,7 @@ impl MainView {
                         Ok(gacha_data) => {
                             match gacha_statistics(gacha_data) {
                                 Ok(gacha_statistics_data) => {
-                                    if let Ok(_) = tx.send(gacha_statistics_data) {
+                                    if let Ok(_) = data_tx.send(gacha_statistics_data) {
                                         info!("刷新统计图");
                                     } else {
                                         error!("数据传输失败！");
@@ -95,14 +93,16 @@ impl MainView {
                             error!("获取抽卡数据失败：{}", err);
                         }
                     }
+                } else {
+                    tokio::time::sleep(Duration::from_secs(1)).await;
                 }
-                tokio::time::sleep(Duration::from_secs(1)).await;
             }
         });
 
         Self {
-            rx,
-            need_update,
+            dark_mode: false,
+            update_flag_tx,
+            data_rx,
             gacha_statistics: GachaStatistics::new(),
             gacha_statistic_view_vec: vec![],
         }
@@ -115,16 +115,32 @@ impl eframe::App for MainView {
             // 定时刷新内容
             ctx.request_repaint_after(Duration::from_millis(1000));
 
-            let button = ui.button("获取数据更新");
-            if let Ok(data) = self.rx.try_recv() {
-                self.gacha_statistics = data;
-            }
+            ui.horizontal(|ui| {
+                // 切换显示模式
+                let switch_style_button_text = if self.dark_mode { "🌙" } else { "☀" };
+                let switch_style_button = ui.button(switch_style_button_text);
+                if switch_style_button.clicked() {
+                    let mut style = (*ctx.style()).clone();
+                    if self.dark_mode {
+                        self.dark_mode = false;
+                        style.visuals = Visuals::light();
+                    } else {
+                        self.dark_mode = true;
+                        style.visuals = Visuals::dark();
+                    }
+                    ctx.set_style(style);
+                }
 
-            if button.clicked() {
-                info!("开始刷新数据...");
-                let _ = &self.gacha_statistic_view_vec.clear();
-                let _ = &self.need_update.swap(true, Ordering::Relaxed);
-            }
+                let update_button = ui.button("获取数据更新");
+                if let Ok(data) = self.data_rx.try_recv() {
+                    self.gacha_statistics = data;
+                }
+                if update_button.clicked() {
+                    info!("开始刷新数据...");
+                    let _ = &self.update_flag_tx.send(true);
+                    let _ = &self.gacha_statistic_view_vec.clear();
+                }
+            });
 
             // 刷新统计图内容
             let _ = &self.create_bar_chart(&self.gacha_statistics.clone());
@@ -150,7 +166,6 @@ impl eframe::App for MainView {
                                         }
                                         Plot::new(format!("{}", item.card_pool_type))
                                             .legend(Legend::default())
-                                            .clamp_grid(true)
                                             .allow_zoom(false)
                                             .allow_drag(false)
                                             .allow_scroll(false)
@@ -216,25 +231,29 @@ impl MainView {
                 let mut bar_chart_vec = vec![];
                 let bar = Bar::new(1f64, gacha_statistics_data.three_count as f64)
                     .width(1.0)
-                    .name("3星");
+                    .fill(Color32::from_rgb(129, 206, 255))
+                    .stroke(Stroke::new(1.5 ,Color32::from_rgb(99, 176, 225)));
                 let bar_chart = BarChart::new(vec![bar])
-                    .name("3星");
-                // .color(Color32::from_rgb(129,206,255));
+                    .name("3星")
+                    .color(Color32::from_rgb(129, 206, 255));
                 bar_chart_vec.push(bar_chart);
 
                 let bar = Bar::new(2f64, gacha_statistics_data.four_count as f64)
                     .width(1.0)
-                    .name("4星");
+                    .fill(Color32::from_rgb(201, 131, 237))
+                    .stroke(Stroke::new(1.5 ,Color32::from_rgb(171, 101, 207)));
                 let bar_chart = BarChart::new(vec![bar])
-                    .name("4星");
-                // .color(Color32::from_rgb(201,131,237));
+                    .name("4星")
+                    .color(Color32::from_rgb(201, 131, 237));
                 bar_chart_vec.push(bar_chart);
 
                 let bar = Bar::new(3f64, gacha_statistics_data.five_count as f64)
                     .width(1.0)
-                    .name("5星");
-                let bar_chart = BarChart::new(vec![bar]).name("5星");
-                // .color(Color32::from_rgb(255,246,145));
+                    .fill(Color32::from_rgb(255,246,145))
+                    .stroke(Stroke::new(1.5 ,Color32::from_rgb(225, 216, 115)));
+                let bar_chart = BarChart::new(vec![bar])
+                    .name("5星")
+                    .color(Color32::from_rgb(255,246,145));
                 bar_chart_vec.push(bar_chart);
 
                 let gacha_statistic_view = GachaStatisticsView {

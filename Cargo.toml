@@ -16,7 +16,9 @@ anyhow = "1"
 regex = "1"
 sysinfo = "0.30"
 tracing = "0.1"
-tracing-subscriber = "0.3.18"
+tracing-subscriber = { version = "0.3.18", features = ['local-time', 'time'] }
+time = { version = "0.3", features = ["macros", "formatting"] }
 egui = "0.28"
 egui_plot = "0.28"
 eframe = { version = "0.28", features = ["wgpu"] }
+image = "0.25"
