@@ -3,6 +3,7 @@ use std::fs;
 use std::fs::OpenOptions;
 use std::io::{Read, Write};
 use anyhow::Error;
+use chrono::Local;
 use serde::{Deserialize, Serialize};
 use tracing::info;
 use crate::core::util;
@@ -111,9 +112,9 @@ pub(crate) async fn get_gacha_data() -> Result<SavedGachaData, Error> {
                     return Err(Error::msg("获取抽卡信息失败！"));
                 }
 
-                let default = vec![];
-                let saved_gacha_data_by_type = saved_gacha_data.get(&card_pool_type)
-                    .unwrap_or(&default);
+                let mut default = vec![];
+                let saved_gacha_data_by_type = saved_gacha_data.get_mut(&card_pool_type)
+                    .unwrap_or(&mut default);
 
                 let mut gacha_data_by_type = vec![];
                 for gacha_data in body.data {
@@ -126,11 +127,9 @@ pub(crate) async fn get_gacha_data() -> Result<SavedGachaData, Error> {
                     gacha_data_by_type.insert(0, gacha_data.clone());
                 }
 
-                // TODO 优化
-                let mut data = saved_gacha_data_by_type.clone();
-                let mut data = data.as_mut();
-                gacha_data_by_type.append(&mut data);
-
+                // 追加旧数据
+                gacha_data_by_type.append(saved_gacha_data_by_type);
+                // 保存追加旧数据后的新数据
                 saved_gacha_data.insert(card_pool_type, gacha_data_by_type);
             }
             Err(err) => {
@@ -138,6 +137,11 @@ pub(crate) async fn get_gacha_data() -> Result<SavedGachaData, Error> {
             }
         }
     }
+
+    let _ = fs::create_dir_all("./data/backup");
+    // 刷新数据前备份数据
+    fs::copy(&file_path, format!("./data/backup/gacha_data_{}.json.{}.backup",
+                                 param.player_id, Local::now().format("%Y-%m-%d-%H-%M-%S-%6f")))?;
 
     let mut file = OpenOptions::new()
         .write(true)

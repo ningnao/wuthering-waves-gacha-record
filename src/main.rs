@@ -16,8 +16,9 @@ use crate::view::main_view::MainView;
 mod core;
 mod view;
 /// TODO LIST
-///    - 保存用户信息
-///    - 优化代码
+///  - 多用户
+///  - 软件配置信息保存
+///  - 优化页面展示
 
 #[tokio::main]
 async fn main() -> eframe::Result {
