@@ -6,6 +6,7 @@ use anyhow::Error;
 use chrono::Local;
 use serde::{Deserialize, Serialize};
 use tracing::info;
+use crate::core::message::MessageSender;
 use crate::core::util;
 
 // 接口统一返回值
@@ -70,7 +71,7 @@ impl RequestParam {
     }
 }
 
-pub(crate) async fn get_gacha_data() -> Result<SavedGachaData, Error> {
+pub(crate) async fn get_gacha_data(message_sender: &MessageSender) -> Result<SavedGachaData, Error> {
     // 从日志文件中获取抽卡历史记录 url
     let record_url = util::get_url_from_logfile()?;
     // 从抽卡历史记录 url 中获取抽卡记录 API 所需要的请求参数
@@ -96,6 +97,7 @@ pub(crate) async fn get_gacha_data() -> Result<SavedGachaData, Error> {
     }
 
     for card_pool_type in 1..=7 {
+        message_sender.send(format!("正在获取卡池 {} 的数据", card_pool_type));
         param.card_pool_type = card_pool_type;
 
         let result = reqwest::Client::new()
@@ -109,7 +111,7 @@ pub(crate) async fn get_gacha_data() -> Result<SavedGachaData, Error> {
                 let body = res.json::<CommonResult>().await?;
                 if body.code != 0 {
                     // 接口请求失败直接返回
-                    return Err(Error::msg("获取抽卡信息失败！"));
+                    return Err(Error::msg("获取抽卡信息失败"));
                 }
 
                 let mut default = vec![];
@@ -119,7 +121,7 @@ pub(crate) async fn get_gacha_data() -> Result<SavedGachaData, Error> {
                 let mut gacha_data_by_type = vec![];
                 for gacha_data in body.data {
                     if saved_gacha_data_by_type.contains(&gacha_data) {
-                        info!("已经到达上次记录位置，停止记录");
+                        info!("卡池 {} 已经到达上次记录位置，停止记录", card_pool_type);
                         break;
                     }
 

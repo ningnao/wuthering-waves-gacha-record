@@ -43,7 +43,7 @@ async fn main() -> eframe::Result {
         viewport: egui::ViewportBuilder::default()
             .with_resizable(false)
             .with_maximize_button(false)
-            .with_inner_size([900.0, 500.0])
+            .with_inner_size([900.0, 520.0])
             .with_icon(icon),
         renderer: Wgpu,
         default_theme: Theme::Light,

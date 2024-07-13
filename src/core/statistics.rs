@@ -5,7 +5,8 @@ use std::io::{Read, Write};
 use anyhow::Error;
 use serde::{Deserialize, Serialize};
 use tracing::info;
-use crate::core::gacha::SavedGachaData;
+use crate::core::gacha::get_gacha_data;
+use crate::core::message::MessageSender;
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone, Default)]
 #[serde(rename_all = "camelCase")]
@@ -31,7 +32,10 @@ pub(crate) struct GachaStatisticsDataItem {
 
 pub(crate) type GachaStatistics = BTreeMap<i32, GachaStatisticsData>;
 
-pub(crate) fn gacha_statistics(gacha_data: SavedGachaData) -> Result<GachaStatistics, Error> {
+pub(crate) async fn gacha_statistics(message_sender: &MessageSender) -> Result<GachaStatistics, Error> {
+    // 从服务获取抽卡数据
+    let gacha_data = get_gacha_data(message_sender).await?;
+
     let mut statistics: GachaStatistics = GachaStatistics::new();
 
     for (card_pool_type, data) in gacha_data {
@@ -77,7 +81,7 @@ pub(crate) fn gacha_statistics(gacha_data: SavedGachaData) -> Result<GachaStatis
         }
     }
 
-    info!("{:?}", statistics);
+    info!("统计数据完毕");
     // 数据处理完毕后写入缓存文件
     let _ = fs::create_dir_all("./data");
     let file_path = String::from("data/gacha_statistic_cache.json");

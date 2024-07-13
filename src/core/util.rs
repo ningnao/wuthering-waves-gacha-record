@@ -44,7 +44,7 @@ pub(crate) fn get_wuthering_waves_progress_path() -> anyhow::Result<Vec<String>,
     }
 
     if log_path.is_empty() {
-        return Err(Error::msg("未找到游戏进程！"));
+        return Err(Error::msg("未找到游戏进程"));
     } else {
         let mut path_metadata_vec = vec![];
         let dir = fs::read_dir(&log_path)?;
@@ -123,7 +123,7 @@ pub(crate) fn get_url_from_logfile() -> anyhow::Result<String, Error> {
         }
     }
 
-    Err(Error::msg("未打开过抽卡页面！"))
+    Err(Error::msg("未打开过抽卡页面"))
 }
 
 #[test]

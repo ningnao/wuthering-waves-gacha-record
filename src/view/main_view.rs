@@ -1,14 +1,16 @@
 use std::cmp::min;
-use std::sync::mpsc;
+use std::sync::{Arc, mpsc};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender};
 use std::time::Duration;
 use eframe::epaint::Stroke;
+use eframe::glow::Context;
 use crate::gacha_statistics;
 use egui::{CentralPanel, Color32, FontData, FontId, TextStyle, Vec2, Vec2b, Visuals};
 use egui::FontFamily::{Monospace, Proportional};
 use egui_plot::{Bar, BarChart, Corner, Legend, Plot};
 use tracing::{error, info};
-use crate::core::gacha::get_gacha_data;
+use crate::core::message::{Message, MessageSender};
 use crate::core::statistics::{gacha_statistics_from_cache, GachaStatistics, GachaStatisticsDataItem};
 
 fn setup_custom_fonts(ctx: &egui::Context) {
@@ -41,79 +43,98 @@ pub(crate) struct MainView {
     dark_mode: bool,
     update_flag_tx: Sender<bool>,
     data_rx: Receiver<GachaStatistics>,
+    message_rx: Receiver<Message>,
+    message: Message,
     gacha_statistics: GachaStatistics,
     gacha_statistic_view_vec: Vec<GachaStatisticsView>,
+    on_exit: Arc<AtomicBool>,
 }
 
 impl MainView {
     pub(crate) fn new(cc: &eframe::CreationContext<'_>) -> Self {
         setup_custom_fonts(&cc.egui_ctx);
 
-        let (update_flag_tx, update_flag_rx) = mpsc::channel::<bool>();
+        let (update_flag_tx, update_flag_rx) = mpsc::channel();
         let (data_tx, data_rx) = mpsc::channel();
+        let (message_tx, message_rx) = mpsc::channel();
 
-        tokio::spawn(async move {
-            let mut first_flag = true;
-            loop {
-                if first_flag || update_flag_rx.recv_timeout(Duration::from_secs(1)).is_ok() {
-                    if first_flag {
-                        first_flag = false;
-                        // 第一次加载时尝试读缓存文件中的统计内容，加快首屏加载速度
-                        match gacha_statistics_from_cache() {
-                            Ok(gacha_statistics_data) => {
-                                if let Ok(_) = data_tx.send(gacha_statistics_data) {
-                                    info!("刷新统计图");
-                                } else {
-                                    error!("数据传输失败！");
-                                }
-                                continue;
-                            }
-                            Err(err) => {
-                                error!("读取缓存失败：{}", err);
-                            }
-                        }
-                    }
+        let message_sender = MessageSender::new(message_tx);
 
-                    match get_gacha_data().await {
-                        Ok(gacha_data) => {
-                            match gacha_statistics(gacha_data) {
-                                Ok(gacha_statistics_data) => {
-                                    if let Ok(_) = data_tx.send(gacha_statistics_data) {
-                                        info!("刷新统计图");
-                                    } else {
-                                        error!("数据传输失败！");
-                                    }
-                                }
-                                Err(err) => {
-                                    error!("抽卡数据统计失败：{}", err);
-                                }
-                            }
-                        }
-                        Err(err) => {
-                            error!("获取抽卡数据失败：{}", err);
-                        }
-                    }
-                } else {
-                    tokio::time::sleep(Duration::from_secs(1)).await;
-                }
-            }
-        });
+        let on_exit_flag = Arc::new(AtomicBool::new(false));
+
+        start_data_flush_thread(Arc::clone(&on_exit_flag), update_flag_rx, data_tx, message_sender);
 
         Self {
             dark_mode: false,
             update_flag_tx,
             data_rx,
+            message_rx,
+            message: Message::default(),
             gacha_statistics: GachaStatistics::new(),
             gacha_statistic_view_vec: vec![],
+            on_exit: on_exit_flag,
         }
     }
+}
+
+fn start_data_flush_thread(on_exit_flag_clone: Arc<AtomicBool>,
+                           update_flag_rx: Receiver<bool>,
+                           data_tx: Sender<GachaStatistics>,
+                           message_sender: MessageSender) {
+    tokio::spawn(async move {
+        let mut first_flag = true;
+        loop {
+            if on_exit_flag_clone.load(Ordering::Relaxed) {
+                info!("应用退出，停止后台线程");
+                break;
+            }
+            if first_flag || update_flag_rx.recv_timeout(Duration::from_secs(1)).is_ok() {
+                message_sender.send("加载中...".to_string());
+                if first_flag {
+                    first_flag = false;
+                    // 第一次加载时尝试读缓存文件中的统计内容，加快首屏加载速度
+                    match gacha_statistics_from_cache() {
+                        Ok(gacha_statistics_data) => {
+                            if let Ok(_) = data_tx.send(gacha_statistics_data) {
+                                message_sender.success("当前展示的是最后一次获取的数据".to_string());
+                                info!("刷新统计图");
+                            } else {
+                                message_sender.failed("内部错误".to_string());
+                                error!("数据传输失败");
+                            }
+                            continue;
+                        }
+                        Err(err) => {
+                            message_sender.failed("无缓存，正在尝试从服务器获取".to_string());
+                            info!("无缓存：{}", err);
+                        }
+                    }
+                }
+
+                match gacha_statistics(&message_sender).await {
+                    Ok(gacha_statistics_data) => {
+                        if let Ok(_) = data_tx.send(gacha_statistics_data) {
+                            message_sender.success("获取完毕".to_string());
+                            info!("刷新统计图");
+                        } else {
+                            error!("数据传输失败");
+                        }
+                    }
+                    Err(err) => {
+                        message_sender.failed(format!("抽卡数据统计失败，失败原因：{}", err));
+                        error!("抽卡数据统计失败：{}", err);
+                    }
+                }
+            }
+        }
+    });
 }
 
 impl eframe::App for MainView {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         CentralPanel::default().show(ctx, |ui| {
             // 定时刷新内容
-            ctx.request_repaint_after(Duration::from_millis(1000));
+            ctx.request_repaint_after(Duration::from_millis(100));
 
             ui.horizontal(|ui| {
                 // 切换显示模式
@@ -139,6 +160,15 @@ impl eframe::App for MainView {
                     info!("开始刷新数据...");
                     let _ = &self.update_flag_tx.send(true);
                     let _ = &self.gacha_statistic_view_vec.clear();
+                }
+
+                if let Ok(message) = self.message_rx.try_recv() {
+                    self.message = message;
+                }
+                if self.message.success {
+                    ui.label(&self.message.message);
+                } else {
+                    ui.colored_label(Color32::from_rgb(232, 176, 4), &self.message.message);
                 }
             });
 
@@ -213,6 +243,11 @@ impl eframe::App for MainView {
             });
         });
     }
+
+    fn on_exit(&mut self, _gl: Option<&Context>) {
+        info!("应用退出...");
+        self.on_exit.swap(true, Ordering::Relaxed);
+    }
 }
 
 struct GachaStatisticsView {
@@ -232,7 +267,7 @@ impl MainView {
                 let bar = Bar::new(1f64, gacha_statistics_data.three_count as f64)
                     .width(1.0)
                     .fill(Color32::from_rgb(129, 206, 255))
-                    .stroke(Stroke::new(1.5 ,Color32::from_rgb(99, 176, 225)));
+                    .stroke(Stroke::new(1.5, Color32::from_rgb(99, 176, 225)));
                 let bar_chart = BarChart::new(vec![bar])
                     .name("3星")
                     .color(Color32::from_rgb(129, 206, 255));
@@ -241,7 +276,7 @@ impl MainView {
                 let bar = Bar::new(2f64, gacha_statistics_data.four_count as f64)
                     .width(1.0)
                     .fill(Color32::from_rgb(201, 131, 237))
-                    .stroke(Stroke::new(1.5 ,Color32::from_rgb(171, 101, 207)));
+                    .stroke(Stroke::new(1.5, Color32::from_rgb(171, 101, 207)));
                 let bar_chart = BarChart::new(vec![bar])
                     .name("4星")
                     .color(Color32::from_rgb(201, 131, 237));
@@ -249,11 +284,11 @@ impl MainView {
 
                 let bar = Bar::new(3f64, gacha_statistics_data.five_count as f64)
                     .width(1.0)
-                    .fill(Color32::from_rgb(255,246,145))
-                    .stroke(Stroke::new(1.5 ,Color32::from_rgb(225, 216, 115)));
+                    .fill(Color32::from_rgb(255, 246, 145))
+                    .stroke(Stroke::new(1.5, Color32::from_rgb(225, 216, 115)));
                 let bar_chart = BarChart::new(vec![bar])
                     .name("5星")
-                    .color(Color32::from_rgb(255,246,145));
+                    .color(Color32::from_rgb(255, 246, 145));
                 bar_chart_vec.push(bar_chart);
 
                 let gacha_statistic_view = GachaStatisticsView {
