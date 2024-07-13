@@ -52,18 +52,18 @@ pub(crate) struct RequestParam {
     // 固定为 zh-Hans
     language_code: String,
     // 用户 ID
-    player_id: String,
+    pub(crate) player_id: String,
     record_id: String,
     // 同 svr_id
     server_id: String,
 }
 
 impl RequestParam {
-    pub(crate) fn init(card_pool_id: String, player_id: String, record_id: String, server_id: String) -> Self {
+    pub(crate) fn init(card_pool_id: String, language_code: String, player_id: String, record_id: String, server_id: String) -> Self {
         Self {
             card_pool_id,
             card_pool_type: 0,
-            language_code: "zh-Hans".to_string(),
+            language_code,
             player_id,
             record_id,
             server_id,
@@ -71,14 +71,12 @@ impl RequestParam {
     }
 }
 
-pub(crate) async fn get_gacha_data(message_sender: &MessageSender) -> Result<SavedGachaData, Error> {
-    // 从日志文件中获取抽卡历史记录 url
-    let record_url = util::get_url_from_logfile()?;
-    // 从抽卡历史记录 url 中获取抽卡记录 API 所需要的请求参数
-    let mut param = util::get_request_param(record_url)?;
+pub(crate) async fn get_gacha_data(player_id: String, message_sender: &MessageSender) -> Result<(String, SavedGachaData), Error> {
+    // 从日志文件中获取抽卡记录 API 所需要的请求参数
+    let mut param = util::get_param_from_logfile(player_id, message_sender)?;
 
-    let _ = fs::create_dir_all("./data");
-    let file_path = String::from(format!("./data/gacha_data_{}.json", param.player_id));
+    let _ = fs::create_dir_all(format!("./data/{}", param.player_id));
+    let file_path = format!("./data/{}/gacha_data.json", param.player_id);
 
     let mut file = OpenOptions::new()
         .read(true)
@@ -140,9 +138,9 @@ pub(crate) async fn get_gacha_data(message_sender: &MessageSender) -> Result<Sav
         }
     }
 
-    let _ = fs::create_dir_all("./data/backup");
+    let _ = fs::create_dir_all(format!("./data/{}/backup", param.player_id));
     // 刷新数据前备份数据
-    fs::copy(&file_path, format!("./data/backup/gacha_data_{}.json.{}.backup",
+    fs::copy(&file_path, format!("./data/{}/backup/gacha_data.json.{}.backup",
                                  param.player_id, Local::now().format("%Y-%m-%d-%H-%M-%S-%6f")))?;
 
     let mut file = OpenOptions::new()
@@ -152,5 +150,5 @@ pub(crate) async fn get_gacha_data(message_sender: &MessageSender) -> Result<Sav
 
     let _ = &file.write_all(&*serde_json::to_vec(&saved_gacha_data)?)?;
 
-    Ok(saved_gacha_data)
+    Ok((param.player_id, saved_gacha_data))
 }

@@ -1,5 +1,4 @@
 use std::collections::BTreeMap;
-use std::fs;
 use std::fs::OpenOptions;
 use std::io::{Read, Write};
 use anyhow::Error;
@@ -32,9 +31,9 @@ pub(crate) struct GachaStatisticsDataItem {
 
 pub(crate) type GachaStatistics = BTreeMap<i32, GachaStatisticsData>;
 
-pub(crate) async fn gacha_statistics(message_sender: &MessageSender) -> Result<GachaStatistics, Error> {
+pub(crate) async fn gacha_statistics(player_id: String, message_sender: &MessageSender) -> Result<GachaStatistics, Error> {
     // 从服务获取抽卡数据
-    let gacha_data = get_gacha_data(message_sender).await?;
+    let (player_id, gacha_data) = get_gacha_data(player_id, message_sender).await?;
 
     let mut statistics: GachaStatistics = GachaStatistics::new();
 
@@ -83,8 +82,7 @@ pub(crate) async fn gacha_statistics(message_sender: &MessageSender) -> Result<G
 
     info!("统计数据完毕");
     // 数据处理完毕后写入缓存文件
-    let _ = fs::create_dir_all("./data");
-    let file_path = String::from("data/gacha_statistic_cache.json");
+    let file_path = format!("data/{}/gacha_statistic_cache.json", player_id);
 
     let mut file = OpenOptions::new()
         .write(true)
@@ -97,9 +95,8 @@ pub(crate) async fn gacha_statistics(message_sender: &MessageSender) -> Result<G
 }
 
 // 从缓存文件中获取统计数据
-pub(crate) fn gacha_statistics_from_cache() -> Result<GachaStatistics, Error> {
-    let _ = fs::create_dir_all("./data");
-    let file_path = String::from("./data/gacha_statistic_cache.json");
+pub(crate) fn gacha_statistics_from_cache(player_id: String) -> Result<GachaStatistics, Error> {
+    let file_path = format!("./data/{}/gacha_statistic_cache.json", player_id);
 
     let mut file = OpenOptions::new()
         .read(true)

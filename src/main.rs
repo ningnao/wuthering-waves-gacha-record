@@ -16,7 +16,6 @@ use crate::view::main_view::MainView;
 mod core;
 mod view;
 /// TODO LIST
-///  - 多用户
 ///  - 软件配置信息保存
 ///  - 优化页面展示
 

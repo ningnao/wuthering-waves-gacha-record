@@ -8,6 +8,7 @@ use sysinfo::System;
 use tracing::info;
 use url::Url;
 use crate::core::gacha::RequestParam;
+use crate::core::message::MessageSender;
 
 pub(crate) fn get_wuthering_waves_progress_path() -> anyhow::Result<Vec<String>, Error> {
     let mut system = System::new();
@@ -82,22 +83,27 @@ fn get_wuthering_waves_progress_path_test() {
     info!("{:?}", path);
 }
 
-pub(crate) fn get_url_from_logfile() -> anyhow::Result<String, Error> {
+pub(crate) fn get_param_from_logfile(player_id: String, message_sender: &MessageSender) -> Result<RequestParam, Error> {
     // 从配置文件中获取历史 url
-    let _ = fs::create_dir_all("./data");
-    if let Ok(mut file) = OpenOptions::new().read(true).open("./data/url_cache.txt") {
+    let _ = fs::create_dir_all(format!("./data/{}", player_id));
+    if let Ok(mut file) = OpenOptions::new().read(true).open(format!("./data/{}/url_cache.txt", player_id)) {
         let mut buffer = String::new();
         file.read_to_string(&mut buffer)?;
         if !buffer.is_empty() {
-            return Ok(buffer);
+            let param = get_request_param(buffer)?;
+            return Ok(param);
         }
     }
 
     let logfile_path_vec = get_wuthering_waves_progress_path()?;
-    info!("解析到的全部日志文件：{:?}", logfile_path_vec);
 
     for logfile_path in logfile_path_vec {
-        info!("解析到的日志路径：{}", logfile_path);
+        // 从路径中截取文件名称用于展示
+        let start_index = logfile_path.rfind("\\").unwrap_or_default() + 1;
+        let (_, filename) = logfile_path.split_at(start_index);
+        message_sender.send(format!("正在从日志文件中获取卡池地址：{}", filename));
+
+        info!("解析到的日志：{}", filename);
         let mut file = OpenOptions::new()
             .read(true)
             .open(logfile_path.clone())?;
@@ -105,21 +111,33 @@ pub(crate) fn get_url_from_logfile() -> anyhow::Result<String, Error> {
         let mut buffer = String::new();
         file.read_to_string(&mut buffer)?;
 
-        let regex = Regex::new("https.*/aki/gacha/index.html#/record[?=&\\w\\-]+")?;
+        let regex = Regex::new(r#"https.*/aki/gacha/index.html#/record[?=&\w\-]+"#)?;
         // 匹配最近的那个
-        let url = regex.find_iter(&*buffer).last();
-        if let Some(url) = url {
+        let mut url_vec = vec![];
+        for url in regex.find_iter(&*buffer) {
+            url_vec.push(url.as_str());
+        }
+        for url in url_vec.into_iter().rev() {
+            // 查找当前选择用户的抽卡 Url
+            if !url.contains(player_id.as_str()) {
+                info!("Url 与选择用户不匹配");
+                continue;
+            }
+
+            info!("获取到的卡池 Url：{}", url);
+
+            let param = get_request_param(url.to_string())?;
+
             // 将获取到的抽卡页面 url 存入文件
+            let _ = fs::create_dir_all(format!("./data/{}", param.player_id));
             let mut file = OpenOptions::new()
                 .write(true)
                 .create(true)
                 .truncate(true)
-                .open("./data/url_cache.txt")?;
-            file.write_all(url.as_str().as_bytes())?;
+                .open(format!("./data/{}/url_cache.txt", param.player_id))?;
+            file.write_all(url.as_bytes())?;
 
-            return Ok(url.as_str().to_string());
-        } else {
-            info!("日志内无目标 url：{}", logfile_path);
+            return Ok(param);
         }
     }
 
@@ -128,7 +146,10 @@ pub(crate) fn get_url_from_logfile() -> anyhow::Result<String, Error> {
 
 #[test]
 fn get_url_from_logfile_test() {
-    get_url_from_logfile().unwrap();
+    let (tx, _) = std::sync::mpsc::channel();
+    let sender = MessageSender::new(tx);
+
+    assert!(get_param_from_logfile("1000000".to_string(), &sender).is_ok());
 }
 
 // https://aki-gm-resources.aki-game.com/aki/gacha/index.html#/record?svr_id=***&player_id=***&lang=zh-Hans&gacha_id=100003&gacha_type=1&svr_area=cn&record_id=***&resources_id=***
@@ -139,25 +160,41 @@ pub(crate) fn get_request_param(url: String) -> Result<RequestParam, Error> {
     let param = url.query_pairs();
 
     let mut resources_id = String::new();
+    let mut lang = String::new();
     let mut player_id = String::new();
     let mut record_id = String::new();
     let mut svr_id = String::new();
     for (key, value) in param.into_iter() {
         match key.to_string().as_str() {
             "resources_id" => { resources_id = value.to_string(); }
+            "lang" => { lang = value.to_string(); }
             "player_id" => { player_id = value.to_string(); }
             "record_id" => { record_id = value.to_string(); }
             "svr_id" => { svr_id = value.to_string(); }
             _ => {}
         }
     }
-    Ok(RequestParam::init(resources_id, player_id, record_id, svr_id))
+    Ok(RequestParam::init(resources_id, lang, player_id, record_id, svr_id))
 }
 
 #[test]
 fn get_request_param_test() {
     let url = "https://aki-gm-resources.aki-game.com/aki/gacha/index.html#/record?svr_id=***&player_id=***&lang=zh-Hans&gacha_id=100003&gacha_type=1&svr_area=cn&record_id=***&resources_id=***";
-    let param = get_request_param(url.to_string());
+    let param = get_request_param(url.to_string()).unwrap();
 
-    info!("{:?}", param);
+    println!("{:?}", param);
+}
+
+pub(crate) fn get_player_id_vec() -> Result<Vec<String>, Error> {
+    let _ = fs::create_dir_all("./data");
+    let data_dir = fs::read_dir("./data")?;
+    let mut player_id_vec = vec![];
+    for dir in data_dir.filter_map(Result::ok) {
+        if dir.metadata()?.is_dir() {
+            player_id_vec.push(dir.file_name().into_string().unwrap_or("数据异常".to_string()));
+        }
+    }
+
+    info!("{:?}", player_id_vec);
+    Ok(player_id_vec)
 }
