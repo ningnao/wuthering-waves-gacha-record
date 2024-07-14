@@ -75,7 +75,7 @@ impl RequestParam {
 
 pub(crate) async fn get_gacha_data(player_id: String, server_sender: &Sender<MessageType>) -> Result<(String, SavedGachaData), Error> {
     // 从日志文件中获取抽卡记录 API 所需要的请求参数
-    let mut param = util::get_param_from_logfile(player_id, server_sender)?;
+    let (oversea, mut param) = util::get_param_from_logfile(player_id, server_sender)?;
 
     let _ = fs::create_dir_all(format!("./data/{}", param.player_id));
     let file_path = format!("./data/{}/gacha_data.json", param.player_id);
@@ -96,12 +96,21 @@ pub(crate) async fn get_gacha_data(player_id: String, server_sender: &Sender<Mes
         saved_gacha_data = SavedGachaData::default();
     }
 
+    // 适配国际服
+    // 国服：gmserver-api.aki-game2.com
+    // 国际服：gmserver-api.aki-game2.net
+    let url = if oversea {
+        "https://gmserver-api.aki-game2.net/gacha/record/query"
+    } else {
+        "https://gmserver-api.aki-game2.com/gacha/record/query"
+    };
+
     for card_pool_type in 1..=7 {
         let _ = server_sender.send(Normal(format!("正在获取卡池 {} 的数据", card_pool_type)));
         param.card_pool_type = card_pool_type;
 
         let result = reqwest::Client::new()
-            .post("https://gmserver-api.aki-game2.com/gacha/record/query")
+            .post(url)
             .json(&param)
             .send()
             .await;

@@ -85,15 +85,15 @@ fn get_wuthering_waves_progress_path_test() {
     info!("{:?}", path);
 }
 
-pub(crate) fn get_param_from_logfile(player_id: String, server_sender: &Sender<MessageType>) -> Result<RequestParam, Error> {
+pub(crate) fn get_param_from_logfile(player_id: String, server_sender: &Sender<MessageType>) -> Result<(bool, RequestParam), Error> {
     // 从配置文件中获取历史 url
     let _ = fs::create_dir_all(format!("./data/{}", player_id));
     if let Ok(mut file) = OpenOptions::new().read(true).open(format!("./data/{}/url_cache.txt", player_id)) {
         let mut buffer = String::new();
         file.read_to_string(&mut buffer)?;
         if !buffer.is_empty() {
-            let param = get_request_param(buffer)?;
-            return Ok(param);
+            let (oversea, param) = get_request_param(buffer)?;
+            return Ok((oversea, param));
         }
     }
 
@@ -114,21 +114,22 @@ pub(crate) fn get_param_from_logfile(player_id: String, server_sender: &Sender<M
         file.read_to_string(&mut buffer)?;
 
         let regex = Regex::new(r#"https.*/aki/gacha/index.html#/record[?=&\w\-]+"#)?;
-        // 匹配最近的那个
+        // TODO 性能优化
+        // 匹配最近打开的 Url
         let mut url_vec = vec![];
         for url in regex.find_iter(&*buffer) {
             url_vec.push(url.as_str());
         }
+
         for url in url_vec.into_iter().rev() {
             // 查找当前选择用户的抽卡 Url
             if !url.contains(player_id.as_str()) {
                 info!("Url 与选择用户不匹配");
                 continue;
             }
-
             info!("获取到的卡池 Url：{}", url);
 
-            let param = get_request_param(url.to_string())?;
+            let (oversea, param) = get_request_param(url.to_string())?;
 
             // 将获取到的抽卡页面 url 存入文件
             let _ = fs::create_dir_all(format!("./data/{}", param.player_id));
@@ -139,7 +140,7 @@ pub(crate) fn get_param_from_logfile(player_id: String, server_sender: &Sender<M
                 .open(format!("./data/{}/url_cache.txt", param.player_id))?;
             file.write_all(url.as_bytes())?;
 
-            return Ok(param);
+            return Ok((oversea, param));
         }
     }
 
@@ -154,10 +155,22 @@ fn get_url_from_logfile_test() {
 }
 
 // https://aki-gm-resources.aki-game.com/aki/gacha/index.html#/record?svr_id=***&player_id=***&lang=zh-Hans&gacha_id=100003&gacha_type=1&svr_area=cn&record_id=***&resources_id=***
-pub(crate) fn get_request_param(url: String) -> Result<RequestParam, Error> {
+pub(crate) fn get_request_param(url: String) -> Result<(bool, RequestParam), Error> {
     // 清除 url 中的 #
     let url = url.replace("#", "");
     let url = Url::parse(&*url)?;
+
+    // 兼容国际服地址
+    let host = url.host_str().ok_or(Error::msg("抽卡地址错误"))?;
+    // 国服：aki-gm-resources.aki-game.com
+    // 国际服：aki-gm-resources-oversea.aki-game.net
+    let oversea =
+        match host {
+            "aki-gm-resources-oversea.aki-game.net" => { true }
+            "aki-gm-resources.aki-game.com" => { false }
+            _ => { return Err(Error::msg("未适配的服务器")); }
+        };
+
     let param = url.query_pairs();
 
     let mut resources_id = String::new();
@@ -175,7 +188,7 @@ pub(crate) fn get_request_param(url: String) -> Result<RequestParam, Error> {
             _ => {}
         }
     }
-    Ok(RequestParam::init(resources_id, lang, player_id, record_id, svr_id))
+    Ok((oversea, RequestParam::init(resources_id, lang, player_id, record_id, svr_id)))
 }
 
 #[test]
