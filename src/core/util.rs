@@ -1,6 +1,7 @@
 use std::fs;
 use std::fs::OpenOptions;
 use std::io::{Read, Write};
+use std::sync::mpsc::Sender;
 use std::time::SystemTime;
 use anyhow::Error;
 use regex::Regex;
@@ -8,7 +9,8 @@ use sysinfo::System;
 use tracing::info;
 use url::Url;
 use crate::core::gacha::RequestParam;
-use crate::core::message::MessageSender;
+use crate::core::message::MessageType;
+use crate::core::message::MessageType::Normal;
 
 pub(crate) fn get_wuthering_waves_progress_path() -> anyhow::Result<Vec<String>, Error> {
     let mut system = System::new();
@@ -83,7 +85,7 @@ fn get_wuthering_waves_progress_path_test() {
     info!("{:?}", path);
 }
 
-pub(crate) fn get_param_from_logfile(player_id: String, message_sender: &MessageSender) -> Result<RequestParam, Error> {
+pub(crate) fn get_param_from_logfile(player_id: String, server_sender: &Sender<MessageType>) -> Result<RequestParam, Error> {
     // 从配置文件中获取历史 url
     let _ = fs::create_dir_all(format!("./data/{}", player_id));
     if let Ok(mut file) = OpenOptions::new().read(true).open(format!("./data/{}/url_cache.txt", player_id)) {
@@ -101,7 +103,7 @@ pub(crate) fn get_param_from_logfile(player_id: String, message_sender: &Message
         // 从路径中截取文件名称用于展示
         let start_index = logfile_path.rfind("\\").unwrap_or_default() + 1;
         let (_, filename) = logfile_path.split_at(start_index);
-        message_sender.send(format!("正在从日志文件中获取卡池地址：{}", filename));
+        let _ = server_sender.send(Normal(format!("正在从日志文件中获取卡池地址：{}", filename)));
 
         info!("解析到的日志：{}", filename);
         let mut file = OpenOptions::new()
@@ -147,9 +149,8 @@ pub(crate) fn get_param_from_logfile(player_id: String, message_sender: &Message
 #[test]
 fn get_url_from_logfile_test() {
     let (tx, _) = std::sync::mpsc::channel();
-    let sender = MessageSender::new(tx);
 
-    assert!(get_param_from_logfile("1000000".to_string(), &sender).is_ok());
+    assert!(get_param_from_logfile("".to_string(), &tx).is_ok());
 }
 
 // https://aki-gm-resources.aki-game.com/aki/gacha/index.html#/record?svr_id=***&player_id=***&lang=zh-Hans&gacha_id=100003&gacha_type=1&svr_area=cn&record_id=***&resources_id=***

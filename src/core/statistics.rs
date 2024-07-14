@@ -1,11 +1,12 @@
 use std::collections::BTreeMap;
 use std::fs::OpenOptions;
 use std::io::{Read, Write};
+use std::sync::mpsc::Sender;
 use anyhow::Error;
 use serde::{Deserialize, Serialize};
 use tracing::info;
 use crate::core::gacha::get_gacha_data;
-use crate::core::message::MessageSender;
+use crate::core::message::MessageType;
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone, Default)]
 #[serde(rename_all = "camelCase")]
@@ -31,9 +32,9 @@ pub(crate) struct GachaStatisticsDataItem {
 
 pub(crate) type GachaStatistics = BTreeMap<i32, GachaStatisticsData>;
 
-pub(crate) async fn gacha_statistics(player_id: String, message_sender: &MessageSender) -> Result<GachaStatistics, Error> {
+pub(crate) async fn gacha_statistics(player_id: String, server_sender: &Sender<MessageType>) -> Result<(String, GachaStatistics), Error> {
     // 从服务获取抽卡数据
-    let (player_id, gacha_data) = get_gacha_data(player_id, message_sender).await?;
+    let (player_id, gacha_data) = get_gacha_data(player_id, server_sender).await?;
 
     let mut statistics: GachaStatistics = GachaStatistics::new();
 
@@ -91,7 +92,7 @@ pub(crate) async fn gacha_statistics(player_id: String, message_sender: &Message
         .open(&file_path)?;
     file.write_all(&*serde_json::to_vec(&statistics)?)?;
 
-    Ok(statistics)
+    Ok((player_id, statistics))
 }
 
 // 从缓存文件中获取统计数据

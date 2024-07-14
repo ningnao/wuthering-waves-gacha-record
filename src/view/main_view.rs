@@ -9,8 +9,9 @@ use crate::gacha_statistics;
 use egui::{CentralPanel, Color32, ComboBox, FontData, FontId, TextStyle, Vec2, Vec2b, Visuals};
 use egui::FontFamily::{Monospace, Proportional};
 use egui_plot::{Bar, BarChart, Corner, Legend, Plot};
-use tracing::{error, info};
-use crate::core::message::{Message, MessageSender};
+use tracing::{error, info, warn};
+use crate::core::message::MessageType;
+use crate::core::message::MessageType::{Gacha, Normal, Player, Update, Warning};
 use crate::core::statistics::{gacha_statistics_from_cache, GachaStatistics, GachaStatisticsDataItem};
 use crate::core::util::get_player_id_vec;
 
@@ -41,119 +42,117 @@ fn setup_custom_fonts(ctx: &egui::Context) {
 }
 
 pub(crate) struct MainView {
+    view_tx: Sender<MessageType>,
+    view_rx: Receiver<MessageType>,
+    on_exit: Arc<AtomicBool>,
     dark_mode: bool,
-    update_data_tx: Sender<String>,
-    data_rx: Receiver<GachaStatistics>,
-    message_rx: Receiver<Message>,
-    player_id_vec_rx: Receiver<Vec<String>>,
-    message: Message,
+
     gacha_statistics: GachaStatistics,
     gacha_statistic_view_vec: Vec<GachaStatisticsView>,
-    on_exit: Arc<AtomicBool>,
     player_id_vec: Vec<String>,
     player_id_selected: String,
     player_id_last_selected: String,
+    message: Message,
+}
+
+#[derive(Default)]
+struct Message {
+    success: bool,
+    message: String,
 }
 
 impl MainView {
     pub(crate) fn new(cc: &eframe::CreationContext<'_>) -> Self {
         setup_custom_fonts(&cc.egui_ctx);
 
-        let (update_data_tx, update_data_rx) = mpsc::channel();
-        let (data_tx, data_rx) = mpsc::channel();
-        let (message_tx, message_rx) = mpsc::channel();
-        let (player_id_vec_tx, player_id_vec_rx) = mpsc::channel();
-
-        let message_sender = MessageSender::new(message_tx);
+        // 服务发送 / 视图接收 通道
+        let (service_tx, view_rx) = mpsc::channel();
+        // 视图发送 / 服务接收 通道
+        let (view_tx, service_rx) = mpsc::channel();
 
         let on_exit_flag = Arc::new(AtomicBool::new(false));
 
-        start_data_flush_thread(Arc::clone(&on_exit_flag), update_data_rx, data_tx, message_sender, player_id_vec_tx);
+        start_data_flush_thread(Arc::clone(&on_exit_flag), service_tx, service_rx);
+
+        let _ = view_tx.send(Update(true, "".to_string()));
 
         Self {
+            view_tx,
+            view_rx,
+            on_exit: on_exit_flag,
             dark_mode: false,
-            update_data_tx,
-            data_rx,
-            message_rx,
-            player_id_vec_rx,
-            message: Message::default(),
             gacha_statistics: GachaStatistics::new(),
             gacha_statistic_view_vec: vec![],
-            on_exit: on_exit_flag,
             player_id_vec: vec![],
             player_id_last_selected: String::default(),
             player_id_selected: String::default(),
+            message: Message::default(),
         }
     }
 }
 
 fn start_data_flush_thread(on_exit_flag_clone: Arc<AtomicBool>,
-                           update_flag_rx: Receiver<String>,
-                           data_tx: Sender<GachaStatistics>,
-                           message_sender: MessageSender,
-                           player_id_vec_tx: Sender<Vec<String>>) {
+                           service_tx: Sender<MessageType>,
+                           service_rx: Receiver<MessageType>) {
     tokio::spawn(async move {
-        let mut first_flag = true;
         loop {
             if on_exit_flag_clone.load(Ordering::Relaxed) {
                 info!("应用退出，停止后台线程");
                 break;
             }
 
-            if first_flag {
-                first_flag = false;
-                // 获取当前保存数据的用户列表
-                if let Ok(user_vec) = get_player_id_vec() {
-                    if !user_vec.is_empty() {
-                        let player_id = user_vec[0].clone();
-                        let _ = player_id_vec_tx.send(user_vec);
+            if let Ok(message) = service_rx.recv_timeout(Duration::from_secs(1)) {
+                match message {
+                    Update(cache, mut player_id) => {
+                        let _ = service_tx.send(Normal("加载中...".to_string()));
+                        if cache {
+                            // 从缓存中获取数据
+                            if let Ok(user_vec) = get_player_id_vec() {
+                                if !user_vec.is_empty() {
+                                    if player_id.is_empty() {
+                                        player_id = user_vec[0].clone();
+                                        let _ = service_tx.send(Player(user_vec));
+                                    }
 
-                        // 第一次加载时尝试读缓存文件中的统计内容，加快首屏加载速度
-                        match gacha_statistics_from_cache(player_id) {
-                            Ok(gacha_statistics_data) => {
-                                if let Ok(_) = data_tx.send(gacha_statistics_data) {
-                                    message_sender.success("当前展示的是最后一次获取的数据".to_string());
-                                    info!("刷新统计图");
-                                } else {
-                                    message_sender.failed("内部错误".to_string());
-                                    error!("数据传输失败");
+                                    // 第一次加载时尝试读缓存文件中的统计内容，加快首屏加载速度
+                                    match gacha_statistics_from_cache(player_id.clone()) {
+                                        Ok(gacha_statistics_data) => {
+                                            let _ = service_tx.send(Gacha((player_id, gacha_statistics_data)));
+                                            let _ = service_tx.send(Normal("当前展示的是该用户最后一次获取的数据".to_string()));
+                                            info!("刷新统计图");
+                                            continue;
+                                        }
+                                        Err(err) => {
+                                            let _ = service_tx.send(Warning("无缓存，正在尝试从服务器获取".to_string()));
+                                            info!("无缓存：{}", err);
+                                        }
+                                    }
                                 }
-                                continue;
+                            }
+
+                            let _ = service_tx.send(Warning("首次使用，正在尝试从服务器获取".to_string()));
+                        }
+
+                        // 从服务器获取抽卡数据
+                        match gacha_statistics(player_id, &service_tx).await {
+                            Ok(gacha_statistics_data) => {
+                                let _ = service_tx.send(Gacha(gacha_statistics_data));
+                                let _ = service_tx.send(Normal("获取完毕".to_string()));
+                                info!("刷新统计图");
+
+                                // 刷新当前保存数据的用户列表
+                                if let Ok(user_vec) = get_player_id_vec() {
+                                    let _ = service_tx.send(Player(user_vec));
+                                }
                             }
                             Err(err) => {
-                                message_sender.failed("无缓存，正在尝试从服务器获取".to_string());
-                                info!("无缓存：{}", err);
+                                let _ = service_tx.send(Warning(format!("抽卡数据统计失败，失败原因：{}", err)));
+                                error!("抽卡数据统计失败：{}", err);
                             }
                         }
-                    } else {
-                        message_sender.failed("首次使用，正在尝试从服务器获取".to_string());
                     }
-                } else {
-                    message_sender.failed("首次使用，正在尝试从服务器获取".to_string());
-                }
-            }
-
-            if let Ok(player_id) = update_flag_rx.recv_timeout(Duration::from_secs(1)) {
-                message_sender.send("加载中...".to_string());
-
-                match gacha_statistics(player_id, &message_sender).await {
-                    Ok(gacha_statistics_data) => {
-                        if let Ok(_) = data_tx.send(gacha_statistics_data) {
-                            message_sender.success("获取完毕".to_string());
-                            info!("刷新统计图");
-
-                            // 刷新当前保存数据的用户列表
-                            if let Ok(user_vec) = get_player_id_vec() {
-                                let _ = player_id_vec_tx.send(user_vec);
-                            }
-                        } else {
-                            message_sender.failed("内部错误".to_string());
-                            error!("数据传输失败");
-                        }
-                    }
-                    Err(err) => {
-                        message_sender.failed(format!("抽卡数据统计失败，失败原因：{}", err));
-                        error!("抽卡数据统计失败：{}", err);
+                    _ => {
+                        warn!("接收到了错误的消息");
                     }
                 }
             }
@@ -163,6 +162,43 @@ fn start_data_flush_thread(on_exit_flag_clone: Arc<AtomicBool>,
 
 impl eframe::App for MainView {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        if let Ok(message) = self.view_rx.try_recv() {
+            match message {
+                Normal(message) => {
+                    self.message = Message {
+                        success: true,
+                        message,
+                    }
+                }
+                Warning(message) => {
+                    self.message = Message {
+                        success: false,
+                        message,
+                    }
+                }
+                Gacha((player_id, gacha_statistic)) => {
+                    self.player_id_selected = player_id.clone();
+                    self.player_id_last_selected = player_id;
+                    self.gacha_statistics = gacha_statistic;
+                }
+                Player(player_id_vec) => {
+                    if !player_id_vec.is_empty() {
+                        for player_id in player_id_vec.clone() {
+                            if !self.player_id_vec.contains(&player_id) {
+                                self.player_id_selected = player_id.clone();
+                                self.player_id_last_selected = player_id;
+                            }
+                        }
+                    }
+
+                    self.player_id_vec = player_id_vec;
+                }
+                _ => {
+                    warn!("接收到了错误的消息");
+                }
+            }
+        }
+
         CentralPanel::default().show(ctx, |ui| {
             // 定时刷新内容
             ctx.request_repaint_after(Duration::from_millis(100));
@@ -183,39 +219,23 @@ impl eframe::App for MainView {
                     ctx.set_style(style);
                 }
 
-                // 监听统计数据变动
                 let update_button = ui.button("获取数据更新");
-                if let Ok(data) = self.data_rx.try_recv() {
-                    self.gacha_statistics = data;
-                }
                 if update_button.clicked() {
                     info!("开始刷新数据...");
-                    let _ = &self.update_data_tx.send(self.player_id_selected.clone());
+                    let _ = &self.view_tx.send(Update(false, self.player_id_selected.clone()));
                     let _ = &self.gacha_statistic_view_vec.clear();
-                }
-
-                // 监听用户 ID 列表数据变动
-                if let Ok(player_id_vec) = self.player_id_vec_rx.try_recv() {
-                    if !player_id_vec.is_empty() {
-                        for player_id in player_id_vec.clone() {
-                            if !self.player_id_vec.contains(&player_id) {
-                                self.player_id_selected = player_id;
-                            }
-                        }
-                    }
-
-                    self.player_id_vec = player_id_vec;
                 }
 
                 // 监听选项变化
                 if self.player_id_last_selected.ne(&self.player_id_selected) {
                     // 刷新数据
                     self.player_id_last_selected = self.player_id_selected.clone();
-                    let _ = self.update_data_tx.send(self.player_id_selected.clone());
+                    let _ = &self.view_tx.send(Update(true, self.player_id_selected.clone()));
                     let _ = self.gacha_statistic_view_vec.clear();
                 }
 
-                ComboBox::from_label("")
+                ui.label("选择用户:");
+                ComboBox::from_id_source("player_id")
                     .selected_text(&self.player_id_selected)
                     .show_ui(ui, |ui| {
                         for player_id in self.player_id_vec.clone() {
@@ -227,13 +247,10 @@ impl eframe::App for MainView {
                 let add_user_button = ui.button("获取新用户");
                 if add_user_button.clicked() {
                     info!("开始获取新用户...");
-                    let _ = &self.update_data_tx.send("".to_string());
+                    let _ = &self.view_tx.send(Update(false, "".to_string()));
                     let _ = &self.gacha_statistic_view_vec.clear();
                 }
 
-                if let Ok(message) = self.message_rx.try_recv() {
-                    self.message = message;
-                }
                 if self.message.success {
                     ui.label(&self.message.message);
                 } else {
@@ -334,7 +351,7 @@ impl MainView {
             for (card_pool_type, gacha_statistics_data) in gacha_statistic.iter() {
                 let mut bar_chart_vec = vec![];
                 let bar = Bar::new(1f64, gacha_statistics_data.three_count as f64)
-                    .width(1.0)
+                    .width(0.95)
                     .fill(Color32::from_rgb(129, 206, 255))
                     .stroke(Stroke::new(1.5, Color32::from_rgb(99, 176, 225)));
                 let bar_chart = BarChart::new(vec![bar])
@@ -343,7 +360,7 @@ impl MainView {
                 bar_chart_vec.push(bar_chart);
 
                 let bar = Bar::new(2f64, gacha_statistics_data.four_count as f64)
-                    .width(1.0)
+                    .width(0.95)
                     .fill(Color32::from_rgb(201, 131, 237))
                     .stroke(Stroke::new(1.5, Color32::from_rgb(171, 101, 207)));
                 let bar_chart = BarChart::new(vec![bar])
@@ -352,7 +369,7 @@ impl MainView {
                 bar_chart_vec.push(bar_chart);
 
                 let bar = Bar::new(3f64, gacha_statistics_data.five_count as f64)
-                    .width(1.0)
+                    .width(0.95)
                     .fill(Color32::from_rgb(255, 246, 145))
                     .stroke(Stroke::new(1.5, Color32::from_rgb(225, 216, 115)));
                 let bar_chart = BarChart::new(vec![bar])
