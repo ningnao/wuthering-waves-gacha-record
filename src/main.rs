@@ -31,7 +31,7 @@ async fn main() -> eframe::Result {
     let subscriber = tracing_subscriber::registry().with(subscriber);
     subscriber::set_global_default(subscriber).unwrap();
 
-    let icon = image::load_from_memory(include_bytes!("resource/icon/icon.png")).unwrap();
+    let icon = image::load_from_memory(include_bytes!("resource/icon/icon.ico")).unwrap();
     let icon = egui::IconData {
         width: icon.width(),
         height: icon.height(),
