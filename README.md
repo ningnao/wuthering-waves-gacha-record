@@ -1,8 +1,8 @@
 <p align="center">
-    <img src="https://github.com/user-attachments/assets/81fdd5b1-53db-4941-9ca2-996a1d9be284" />
-</p>
+    <img width="40%" src="https://github.com/user-attachments/assets/81fdd5b1-53db-4941-9ca2-996a1d9be284" />
 
 # wuthering-waves-gacha-record
+</p>
 一个使用 Rust 制作的小工具，支持 Windows 10 (x64) 及以上的系统。
 通过读取游戏目录下的日志文件，自动获取抽卡统计信息。
 
@@ -28,6 +28,9 @@
 添加新用户：
 1. 游戏中使用新用户打开抽卡记录页
 2. 点击`获取新用户`按钮等待片刻
+
+## 下载
+[Github 下载](https://github.com/ningnao/wuthering-waves-gacha-record/releases/tag/release)
 
 ## 截图
 ![img](https://github.com/user-attachments/assets/5a5a7dcc-8e9d-411a-99fa-6f1d76898365)
