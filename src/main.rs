@@ -3,7 +3,6 @@
 
 use eframe::Renderer::Wgpu;
 use eframe::Theme;
-use egui::{Style, Visuals};
 use time::macros::format_description;
 use tracing::level_filters::LevelFilter;
 use tracing::subscriber;
@@ -45,6 +44,7 @@ async fn main() -> eframe::Result {
             .with_icon(icon),
         renderer: Wgpu,
         default_theme: Theme::Light,
+        centered: true,
         ..Default::default()
     };
     eframe::run_native(
