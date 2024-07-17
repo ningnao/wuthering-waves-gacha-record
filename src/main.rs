@@ -16,7 +16,6 @@ use crate::view::main_view::MainView;
 mod core;
 mod view;
 /// TODO LIST
-///  - 软件配置信息保存
 ///  - 优化页面展示
 
 #[tokio::main]
@@ -52,11 +51,6 @@ async fn main() -> eframe::Result {
         "鸣潮抽卡记录工具",
         options,
         Box::new(|cc| {
-            let style = Style {
-                visuals: Visuals::light(),
-                ..Style::default()
-            };
-            cc.egui_ctx.set_style(style);
             Ok(Box::new(MainView::new(cc)))
         }),
     )

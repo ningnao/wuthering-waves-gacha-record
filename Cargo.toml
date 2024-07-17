@@ -23,6 +23,7 @@ egui = "0.28"
 egui_plot = "0.28"
 eframe = { version = "0.28", features = ["wgpu"] }
 image = "0.25"
+toml = "0.8"
 
 [build-dependencies]
 winres = "0.1"

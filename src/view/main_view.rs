@@ -1,4 +1,7 @@
 use std::cmp::min;
+use std::fs;
+use std::fs::OpenOptions;
+use std::io::Write;
 use std::sync::{Arc, mpsc};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender};
@@ -9,36 +12,17 @@ use crate::gacha_statistics;
 use egui::{CentralPanel, Color32, ComboBox, FontData, FontId, TextStyle, Vec2, Vec2b, Visuals};
 use egui::FontFamily::{Monospace, Proportional};
 use egui_plot::{Bar, BarChart, Corner, Legend, Plot};
+use serde::{Deserialize, Serialize};
 use tracing::{error, info, warn};
 use crate::core::message::MessageType;
 use crate::core::message::MessageType::{Gacha, Normal, Player, Update, Warning};
 use crate::core::statistics::{gacha_statistics_from_cache, GachaStatistics, GachaStatisticsDataItem};
 use crate::core::util::get_player_id_vec;
 
-fn setup_custom_fonts(ctx: &egui::Context) {
-    // Start with the default fonts (we will be adding to them rather than replacing them).
-    let mut fonts = egui::FontDefinitions::default();
-
-    // 使用 得意黑 作为 UI 字体
-    fonts.font_data.insert("SmileySans".to_owned(), FontData::from_static(include_bytes!("../resource/fonts/SmileySans-Oblique.otf")));
-    // Install my own font (maybe supporting non-latin characters).
-    // .ttf and .otf files supported.
-    fonts.families.get_mut(&Proportional).unwrap().insert(0, "SmileySans".to_owned());
-
-    // Tell egui to use these fonts:
-    ctx.set_fonts(fonts);
-
-    // 设置字体默认样式
-    let mut style = (*ctx.style()).clone();
-    style.text_styles = [
-        (TextStyle::Heading, FontId::new(25.0, Proportional)),
-        (TextStyle::Body, FontId::new(16.0, Proportional)),
-        (TextStyle::Monospace, FontId::new(12.0, Monospace)),
-        (TextStyle::Button, FontId::new(16.0, Proportional)),
-        (TextStyle::Small, FontId::new(8.0, Proportional)),
-    ]
-        .into();
-    ctx.set_style(style);
+#[derive(Serialize, Deserialize)]
+struct Config {
+    dark_mode: bool,
+    player_id_selected: String,
 }
 
 pub(crate) struct MainView {
@@ -63,8 +47,7 @@ struct Message {
 
 impl MainView {
     pub(crate) fn new(cc: &eframe::CreationContext<'_>) -> Self {
-        setup_custom_fonts(&cc.egui_ctx);
-
+        // 初始化数据处理线程
         // 服务发送 / 视图接收 通道
         let (service_tx, view_rx) = mpsc::channel();
         // 视图发送 / 服务接收 通道
@@ -76,19 +59,65 @@ impl MainView {
 
         let _ = view_tx.send(Update(true, "".to_string()));
 
+        let mut dark_mode = false;
+        let mut player_id_selected = String::default();
+
+        // 读取用户配置
+        if let Ok(config) = fs::read_to_string("./data/config.toml") {
+            if let Ok(config) = toml::from_str::<Config>(config.as_str()) {
+                dark_mode = config.dark_mode;
+                player_id_selected = config.player_id_selected;
+            }
+        }
+
+        // 样式配置
+        setup_custom_style(&cc.egui_ctx, dark_mode);
+
         Self {
             view_tx,
             view_rx,
             on_exit: on_exit_flag,
-            dark_mode: false,
+            dark_mode,
             gacha_statistics: GachaStatistics::new(),
             gacha_statistic_view_vec: vec![],
             player_id_vec: vec![],
             player_id_last_selected: String::default(),
-            player_id_selected: String::default(),
+            player_id_selected,
             message: Message::default(),
         }
     }
+}
+
+fn setup_custom_style(ctx: &egui::Context, dark_mode: bool) {
+    // Start with the default fonts (we will be adding to them rather than replacing them).
+    let mut fonts = egui::FontDefinitions::default();
+
+    // 使用 得意黑 作为 UI 字体
+    fonts.font_data.insert("SmileySans".to_owned(), FontData::from_static(include_bytes!("../resource/fonts/SmileySans-Oblique.otf")));
+    // Install my own font (maybe supporting non-latin characters).
+    // .ttf and .otf files supported.
+    fonts.families.get_mut(&Proportional).unwrap().insert(0, "SmileySans".to_owned());
+
+    // Tell egui to use these fonts:
+    ctx.set_fonts(fonts);
+
+    // 设置字体默认样式
+    let mut style = (*ctx.style()).clone();
+    style.text_styles = [
+        (TextStyle::Heading, FontId::new(25.0, Proportional)),
+        (TextStyle::Body, FontId::new(16.0, Proportional)),
+        (TextStyle::Monospace, FontId::new(12.0, Monospace)),
+        (TextStyle::Button, FontId::new(16.0, Proportional)),
+        (TextStyle::Small, FontId::new(8.0, Proportional)),
+    ].into();
+
+    if dark_mode {
+        style.visuals = Visuals::dark();
+    } else {
+        style.visuals = Visuals::light();
+    }
+
+    ctx.set_style(style);
 }
 
 fn start_data_flush_thread(on_exit_flag_clone: Arc<AtomicBool>,
@@ -333,6 +362,19 @@ impl eframe::App for MainView {
     fn on_exit(&mut self, _gl: Option<&Context>) {
         info!("应用退出...");
         self.on_exit.swap(true, Ordering::Relaxed);
+        info!("储存用户配置...");
+        let _ = fs::create_dir_all("./data");
+        if let Ok(config_str) = toml::to_string(&Config {
+            dark_mode: self.dark_mode,
+            player_id_selected: self.player_id_selected.clone(),
+        }) {
+            if let Ok(mut file) = OpenOptions::new().write(true)
+                .truncate(true)
+                .create(true)
+                .open("./data/config.toml") {
+                let _ = file.write_all(config_str.as_bytes());
+            }
+        }
     }
 }
 
