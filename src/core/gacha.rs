@@ -138,10 +138,11 @@ pub(crate) async fn get_gacha_data(player_id: String, server_sender: &Sender<Mes
                     gacha_data_by_type.insert(0, gacha_data.clone());
                 }
 
-                // 追加旧数据
-                gacha_data_by_type.append(saved_gacha_data_by_type);
-                // 保存追加旧数据后的新数据
-                saved_gacha_data.insert(card_pool_type, gacha_data_by_type);
+                // 在旧数据后追加新数据
+                let mut saved_gacha_data_by_type = saved_gacha_data_by_type.clone();
+                saved_gacha_data_by_type.append(&mut gacha_data_by_type);
+                // 保存
+                saved_gacha_data.insert(card_pool_type, saved_gacha_data_by_type);
             }
             Err(err) => {
                 return Err(Error::from(err));
