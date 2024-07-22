@@ -13,6 +13,7 @@
 - 更新记录无需启动游戏
 - 支持同时记录多个不同服务器的用户抽卡信息
 - 主题切换
+- 程序更新提醒
 
 ## 数据目录
 程序运行时会在当前目录下生成`data`文件夹，用于缓存和存储用户数据及抽卡历史数据,每个用户一个文件夹
@@ -39,3 +40,4 @@
 ## 截图
 ![img](https://github.com/user-attachments/assets/5a5a7dcc-8e9d-411a-99fa-6f1d76898365)
 ![img](https://github.com/user-attachments/assets/05d2081a-33cc-42f6-9fad-fd2b7f9d805d)
+![img](https://github.com/user-attachments/assets/90c4ae2b-0c31-4a62-a0dd-c7ad65819135)
