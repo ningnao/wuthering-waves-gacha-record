@@ -17,6 +17,8 @@ mod view;
 /// TODO LIST
 ///  - 优化页面展示
 
+pub(crate) const VERSION: &str = env!("CARGO_PKG_VERSION");
+
 #[tokio::main]
 async fn main() -> eframe::Result {
     // 日志初始化
@@ -47,8 +49,9 @@ async fn main() -> eframe::Result {
         centered: true,
         ..Default::default()
     };
+
     eframe::run_native(
-        "鸣潮抽卡记录工具",
+        format!("鸣潮抽卡记录工具 v{}", VERSION).as_str(),
         options,
         Box::new(|cc| {
             Ok(Box::new(MainView::new(cc)))

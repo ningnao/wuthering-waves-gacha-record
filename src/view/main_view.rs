@@ -15,8 +15,9 @@ use egui_plot::{Bar, BarChart, Corner, Legend, Plot};
 use serde::{Deserialize, Serialize};
 use tracing::{error, info, warn};
 use crate::core::message::MessageType;
-use crate::core::message::MessageType::{Gacha, Normal, Player, Update, Warning};
+use crate::core::message::MessageType::{CheckUpdate, DownloadFile, Gacha, NeedUpdate, Normal, Player, UpdateData, Warning};
 use crate::core::statistics::{gacha_statistics_from_cache, GachaStatistics, GachaStatisticsDataItem};
+use crate::core::update::{check_update, download_file, Release};
 use crate::core::util::get_player_id_vec;
 
 #[derive(Serialize, Deserialize)]
@@ -37,12 +38,19 @@ pub(crate) struct MainView {
     player_id_selected: String,
     player_id_last_selected: String,
     message: Message,
+    update_info: Option<Release>,
+    view: View,
 }
 
 #[derive(Default)]
 struct Message {
     success: bool,
     message: String,
+}
+
+enum View {
+    Home,
+    Update,
 }
 
 impl MainView {
@@ -57,7 +65,8 @@ impl MainView {
 
         start_data_flush_thread(Arc::clone(&on_exit_flag), service_tx, service_rx);
 
-        let _ = view_tx.send(Update(true, "".to_string()));
+        let _ = view_tx.send(UpdateData(true, "".to_string()));
+        let _ = view_tx.send(CheckUpdate);
 
         let mut dark_mode = false;
         let mut player_id_selected = String::default();
@@ -84,6 +93,8 @@ impl MainView {
             player_id_last_selected: String::default(),
             player_id_selected,
             message: Message::default(),
+            update_info: None,
+            view: View::Home,
         }
     }
 }
@@ -132,7 +143,28 @@ fn start_data_flush_thread(on_exit_flag_clone: Arc<AtomicBool>,
 
             if let Ok(message) = service_rx.recv_timeout(Duration::from_secs(1)) {
                 match message {
-                    Update(cache, mut player_id) => {
+                    CheckUpdate => {
+                        info!("检查应用更新");
+                        if let Ok(update_info) = check_update().await {
+                            info!("程序有更新");
+                            let _ = service_tx.send(NeedUpdate(update_info));
+                        } else {
+                            info!("当前已是最新版本");
+                        }
+                    }
+                    DownloadFile(release, filepath) => {
+                        let _ = service_tx.send(Normal("正在连接服务器...".to_string()));
+                        match download_file(release, filepath, service_tx.clone()).await {
+                            Ok(_) => {
+                                info!("更新包下载完毕");
+                                let _ = service_tx.send(Normal("下载完毕 100%".to_string()));
+                            }
+                            Err(err) => {
+                                let _ = service_tx.send(Warning(format!("下载失败：{}", err)));
+                            }
+                        }
+                    }
+                    UpdateData(cache, mut player_id) => {
                         let _ = service_tx.send(Normal("加载中...".to_string()));
                         if cache {
                             // 从缓存中获取数据
@@ -222,6 +254,9 @@ impl eframe::App for MainView {
 
                     self.player_id_vec = player_id_vec;
                 }
+                NeedUpdate(update_info) => {
+                    self.update_info = Some(update_info);
+                }
                 _ => {
                     warn!("接收到了错误的消息");
                 }
@@ -251,7 +286,7 @@ impl eframe::App for MainView {
                 let update_button = ui.button("获取数据更新");
                 if update_button.clicked() {
                     info!("开始刷新数据...");
-                    let _ = &self.view_tx.send(Update(false, self.player_id_selected.clone()));
+                    let _ = &self.view_tx.send(UpdateData(false, self.player_id_selected.clone()));
                     let _ = &self.gacha_statistic_view_vec.clear();
                 }
 
@@ -259,7 +294,7 @@ impl eframe::App for MainView {
                 if self.player_id_last_selected.ne(&self.player_id_selected) {
                     // 刷新数据
                     self.player_id_last_selected = self.player_id_selected.clone();
-                    let _ = &self.view_tx.send(Update(true, self.player_id_selected.clone()));
+                    let _ = &self.view_tx.send(UpdateData(true, self.player_id_selected.clone()));
                     let _ = self.gacha_statistic_view_vec.clear();
                 }
 
@@ -276,8 +311,15 @@ impl eframe::App for MainView {
                 let add_user_button = ui.button("获取新用户");
                 if add_user_button.clicked() {
                     info!("开始获取新用户...");
-                    let _ = &self.view_tx.send(Update(false, "".to_string()));
+                    let _ = &self.view_tx.send(UpdateData(false, "".to_string()));
                     let _ = &self.gacha_statistic_view_vec.clear();
+                }
+
+                if let Some(update_info) = &self.update_info {
+                    let new_version = ui.button(format!("新版本 {}", update_info.tag_name));
+                    if new_version.clicked() {
+                        self.view = View::Update;
+                    }
                 }
 
                 if self.message.success {
@@ -287,75 +329,112 @@ impl eframe::App for MainView {
                 }
             });
 
-            // 刷新统计图内容
-            let _ = &self.create_bar_chart(&self.gacha_statistics.clone());
-            let gacha_statistic_view_vec = &mut self.gacha_statistic_view_vec;
+            if let View::Home = self.view {
+                // 刷新统计图内容
+                let _ = &self.create_bar_chart(&self.gacha_statistics.clone());
+                let gacha_statistic_view_vec = &mut self.gacha_statistic_view_vec;
 
-            egui::ScrollArea::vertical().drag_to_scroll(false).show(ui, |ui| {
-                for _ in 0..(gacha_statistic_view_vec.len() as f32 / 3.0).ceil() as i32 {
-                    ui.vertical(|ui| {
-                        ui.horizontal(|ui| {
-                            ui.group(|ui| {
-                                for _ in 0..min(3, gacha_statistic_view_vec.len() as i32) {
-                                    let item = gacha_statistic_view_vec.remove(0);
-                                    ui.vertical(|ui| {
-                                        match item.card_pool_type {
-                                            1 => { ui.label("角色活动唤取"); }
-                                            2 => { ui.label("武器活动唤取"); }
-                                            3 => { ui.label("角色常驻唤取"); }
-                                            4 => { ui.label("武器常驻唤取"); }
-                                            5 => { ui.label("新手唤取"); }
-                                            6 => { ui.label("新手自选唤取"); }
-                                            7 => { ui.label("新手自选唤取（感恩定向唤取）"); }
-                                            _ => { ui.label("新卡池"); }
-                                        }
-                                        Plot::new(format!("{}", item.card_pool_type))
-                                            .legend(Legend::default())
-                                            .allow_zoom(false)
-                                            .allow_drag(false)
-                                            .allow_scroll(false)
-                                            .allow_boxed_zoom(false)
-                                            .show_axes(Vec2b::from([true, false]))
-                                            .show_grid(false)
-                                            .legend(Legend::default().position(Corner::LeftBottom))
-                                            .label_formatter(|_, _| { "".to_owned() })
-                                            .width(285.0)
-                                            .height(150.0)
-                                            .set_margin_fraction(Vec2::from([0.2, 0.2]))
-                                            .x_axis_formatter(|mark, _| {
-                                                match mark.value as i32 {
-                                                    1 => {
-                                                        "3星".to_string()
+                egui::ScrollArea::vertical().drag_to_scroll(false).show(ui, |ui| {
+                    for _ in 0..(gacha_statistic_view_vec.len() as f32 / 3.0).ceil() as i32 {
+                        ui.vertical(|ui| {
+                            ui.horizontal(|ui| {
+                                ui.group(|ui| {
+                                    for _ in 0..min(3, gacha_statistic_view_vec.len() as i32) {
+                                        let item = gacha_statistic_view_vec.remove(0);
+                                        ui.vertical(|ui| {
+                                            match item.card_pool_type {
+                                                1 => { ui.label("角色活动唤取"); }
+                                                2 => { ui.label("武器活动唤取"); }
+                                                3 => { ui.label("角色常驻唤取"); }
+                                                4 => { ui.label("武器常驻唤取"); }
+                                                5 => { ui.label("新手唤取"); }
+                                                6 => { ui.label("新手自选唤取"); }
+                                                7 => { ui.label("新手自选唤取（感恩定向唤取）"); }
+                                                _ => { ui.label("新卡池"); }
+                                            }
+                                            Plot::new(format!("{}", item.card_pool_type))
+                                                .legend(Legend::default())
+                                                .allow_zoom(false)
+                                                .allow_drag(false)
+                                                .allow_scroll(false)
+                                                .allow_boxed_zoom(false)
+                                                .show_axes(Vec2b::from([true, false]))
+                                                .show_grid(false)
+                                                .legend(Legend::default().position(Corner::LeftBottom))
+                                                .label_formatter(|_, _| { "".to_owned() })
+                                                .width(285.0)
+                                                .height(150.0)
+                                                .set_margin_fraction(Vec2::from([0.2, 0.2]))
+                                                .x_axis_formatter(|mark, _| {
+                                                    match mark.value as i32 {
+                                                        1 => {
+                                                            "3星".to_string()
+                                                        }
+                                                        2 => {
+                                                            "4星".to_string()
+                                                        }
+                                                        3 => {
+                                                            "5星".to_string()
+                                                        }
+                                                        _ => { "".to_owned() }
                                                     }
-                                                    2 => {
-                                                        "4星".to_string()
+                                                })
+                                                .show(ui, |plot_ui| {
+                                                    for bar_chart in item.bar_chart_vec {
+                                                        plot_ui.bar_chart(bar_chart);
                                                     }
-                                                    3 => {
-                                                        "5星".to_string()
-                                                    }
-                                                    _ => { "".to_owned() }
-                                                }
-                                            })
-                                            .show(ui, |plot_ui| {
-                                                for bar_chart in item.bar_chart_vec {
-                                                    plot_ui.bar_chart(bar_chart);
+                                                });
+                                            ui.label(format!("当前累计[{}]抽，已垫[{}]抽，5星[{}]个",
+                                                             item.total, item.pull_count, item.detail.len()));
+                                            ui.horizontal_wrapped(|ui| {
+                                                ui.set_max_width(285.0);
+                                                for item in item.detail {
+                                                    ui.label(format!("{}[{}]", item.name, item.count));
                                                 }
                                             });
-                                        ui.label(format!("当前累计[{}]抽，已垫[{}]抽，5星[{}]个",
-                                                         item.total, item.pull_count, item.detail.len()));
-                                        ui.horizontal_wrapped(|ui| {
-                                            ui.set_max_width(285.0);
-                                            for item in item.detail {
-                                                ui.label(format!("{}[{}]", item.name, item.count));
-                                            }
                                         });
-                                    });
-                                }
+                                    }
+                                });
                             });
                         });
+                    }
+                });
+            }
+
+            if let View::Update = self.view {
+                if let Some(update_info) = &self.update_info {
+                    ui.vertical_centered_justified(|ui| {
+                        ui.group(|ui| {
+                            ui.label(format!("发现新版本：{}", update_info.tag_name));
+                            ui.label("");
+                            ui.label("更新日志：");
+                            ui.label(&update_info.body);
+                            ui.label("");
+
+                            let download_button = ui.button("下载更新");
+                            if download_button.clicked() {
+                                self.view = View::Update;
+                                if let Some(path) = rfd::FileDialog::new().set_title("请选择更新包存放位置").pick_folder() {
+                                    let picked_path = path.display().to_string();
+                                    info!("选择的文件 {:?}", picked_path);
+                                    let _ = &self.view_tx.send(DownloadFile(update_info.clone(), picked_path));
+                                } else {
+                                    self.message = Message {
+                                        success: true,
+                                        message: "用户取消升级...".to_string(),
+                                    }
+                                }
+                            }
+                            let cancel_button = ui.button("取消更新");
+                            if cancel_button.clicked() {
+                                self.view = View::Home;
+                            }
+                        });
                     });
+                } else {
+                    self.view = View::Home;
                 }
-            });
+            }
         });
     }
 

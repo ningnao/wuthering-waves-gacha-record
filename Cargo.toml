@@ -8,8 +8,8 @@ build = "build.rs"
 
 [dependencies]
 chrono = { version = "0.4", features = ["serde"] }
-reqwest = { version = "0.12", features = ["json"] }
-tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros"] }
+reqwest = { version = "0.12", features = ["json", "stream"] }
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "fs"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 url = "2"
@@ -24,6 +24,9 @@ egui_plot = "0.28"
 eframe = { version = "0.28", features = ["wgpu"] }
 image = "0.25"
 toml = "0.8"
+rfd = "0.14"
+futures-util = "0.3"
+ratelimit = "0.9"
 
 [build-dependencies]
 winres = "0.1"
