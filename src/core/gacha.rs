@@ -119,8 +119,9 @@ pub(crate) async fn get_gacha_data(player_id: String, server_sender: &Sender<Mes
             Ok(res) => {
                 let body = res.json::<CommonResult>().await?;
                 if body.code != 0 {
-                    // 接口请求失败直接返回
-                    return Err(Error::msg("获取抽卡信息失败"));
+                    // 接口请求失败，可能是请求参数变化，删除 url 缓存，下次重新获取
+                    let _ = fs::remove_file(format!("./data/{}/url_cache.txt", param.player_id));
+                    return Err(Error::msg("抽卡链接可能已经失效，请打开抽卡页面后重新获取。"));
                 }
 
                 let mut default = vec![];
@@ -145,7 +146,7 @@ pub(crate) async fn get_gacha_data(player_id: String, server_sender: &Sender<Mes
                 saved_gacha_data.insert(card_pool_type, saved_gacha_data_by_type);
             }
             Err(err) => {
-                return Err(Error::from(err));
+                return Err(Error::msg(format!("网络连接异常：{}", err)));
             }
         }
     }
