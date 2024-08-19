@@ -18,7 +18,7 @@ pub(crate) fn get_wuthering_waves_progress_path() -> anyhow::Result<Vec<String>,
 
     let mut log_path = String::new();
     // TODO 优化
-    for process in system.processes_by_name("launcher.exe") {
+    for process in system.processes_by_name("launcher.exe".as_ref()) {
         if let Some(path) = process.exe() {
             if let Some(path) = path.parent() {
                 if let Some(path) = path.to_str() {
@@ -32,7 +32,7 @@ pub(crate) fn get_wuthering_waves_progress_path() -> anyhow::Result<Vec<String>,
     }
 
     if log_path.is_empty() {
-        for process in system.processes_by_name("Wuthering Waves.exe") {
+        for process in system.processes_by_name("Wuthering Waves.exe".as_ref()) {
             if let Some(path) = process.exe() {
                 if let Some(path) = path.parent() {
                     if let Some(path) = path.to_str() {
@@ -78,6 +78,29 @@ pub(crate) fn get_wuthering_waves_progress_path() -> anyhow::Result<Vec<String>,
         Ok(log_file_vec)
     }
 }
+fn get_path_from_cache() -> anyhow::Result<Vec<String>, Error> {
+    let mut buffer = String::new();
+    if let Ok(mut file) = OpenOptions::new().read(true).open("./data/path_cache.txt") {
+        file.read_to_string(&mut buffer)?;
+        if !buffer.is_empty() {
+            let buffer_list:Vec<String> = buffer.split('\n').map(String::from).collect();
+            return Ok(buffer_list);
+        }
+    }
+
+    let path = get_wuthering_waves_progress_path();
+    return if path.is_ok() {
+        let path = path.unwrap();
+        if let Ok(mut file) = OpenOptions::new().write(true).open("./data/path_cache.txt") {
+            for log_path in path.clone() {
+                file.write((log_path.clone() + "\n").as_bytes()).expect("Write Error");
+            }
+        }
+        Ok(path)
+    } else {
+        Err(Error::msg("第一次使用时需要打开游戏，并进入抽卡页面"))
+    }
+}
 
 #[test]
 fn get_wuthering_waves_progress_path_test() {
@@ -97,7 +120,7 @@ pub(crate) fn get_param_from_logfile(player_id: String, server_sender: &Sender<M
         }
     }
 
-    let logfile_path_vec = get_wuthering_waves_progress_path()?;
+    let logfile_path_vec = get_path_from_cache()?;
 
     for logfile_path in logfile_path_vec {
         // 从路径中截取文件名称用于展示

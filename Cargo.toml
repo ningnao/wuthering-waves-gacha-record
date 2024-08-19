@@ -1,6 +1,6 @@
 [package]
 name = "wuthering-waves-gacha-record"
-version = "0.5.0"
+version = "0.5.1"
 edition = "2021"
 build = "build.rs"
 
@@ -15,7 +15,7 @@ serde_json = "1"
 url = "2"
 anyhow = "1"
 regex = "1"
-sysinfo = "0.30"
+sysinfo = "0.31"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3.18", features = ['local-time', 'time'] }
 time = { version = "0.3", features = ["macros", "formatting"] }
