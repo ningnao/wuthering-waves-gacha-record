@@ -6,12 +6,11 @@ use std::sync::{Arc, mpsc};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender};
 use std::time::Duration;
-use eframe::epaint::Stroke;
 use eframe::glow::Context;
 use crate::gacha_statistics;
-use egui::{CentralPanel, Color32, ComboBox, FontData, FontId, TextStyle, Vec2, Vec2b, Visuals};
+use crate::widgets::pie_chart::PieChart;
+use egui::{CentralPanel, Color32, ComboBox, FontData, FontId, TextStyle, Visuals};
 use egui::FontFamily::{Monospace, Proportional};
-use egui_plot::{Bar, BarChart, Corner, Legend, Plot};
 use serde::{Deserialize, Serialize};
 use tracing::{error, info, warn};
 use crate::core::message::MessageType;
@@ -340,7 +339,7 @@ impl eframe::App for MainView {
                             ui.horizontal(|ui| {
                                 ui.group(|ui| {
                                     for _ in 0..min(3, gacha_statistic_view_vec.len() as i32) {
-                                        let item = gacha_statistic_view_vec.remove(0);
+                                        let mut item = gacha_statistic_view_vec.remove(0);
                                         ui.vertical(|ui| {
                                             match item.card_pool_type {
                                                 1 => { ui.label("角色活动唤取"); }
@@ -352,38 +351,8 @@ impl eframe::App for MainView {
                                                 7 => { ui.label("新手自选唤取（感恩定向唤取）"); }
                                                 _ => { ui.label("新卡池"); }
                                             }
-                                            Plot::new(format!("{}", item.card_pool_type))
-                                                .legend(Legend::default())
-                                                .allow_zoom(false)
-                                                .allow_drag(false)
-                                                .allow_scroll(false)
-                                                .allow_boxed_zoom(false)
-                                                .show_axes(Vec2b::from([true, false]))
-                                                .show_grid(false)
-                                                .legend(Legend::default().position(Corner::LeftBottom))
-                                                .label_formatter(|_, _| { "".to_owned() })
-                                                .width(285.0)
-                                                .height(150.0)
-                                                .set_margin_fraction(Vec2::from([0.2, 0.2]))
-                                                .x_axis_formatter(|mark, _| {
-                                                    match mark.value as i32 {
-                                                        1 => {
-                                                            "3星".to_string()
-                                                        }
-                                                        2 => {
-                                                            "4星".to_string()
-                                                        }
-                                                        3 => {
-                                                            "5星".to_string()
-                                                        }
-                                                        _ => { "".to_owned() }
-                                                    }
-                                                })
-                                                .show(ui, |plot_ui| {
-                                                    for bar_chart in item.bar_chart_vec {
-                                                        plot_ui.bar_chart(bar_chart);
-                                                    }
-                                                });
+                                            item.pie_chart.show(ui);
+
                                             ui.label(format!("当前累计[{}]抽，已垫[{}]抽，5星[{}]个",
                                                              item.total, item.pull_count, item.detail.len()));
                                             ui.horizontal_wrapped(|ui| {
@@ -461,7 +430,7 @@ struct GachaStatisticsView {
     card_pool_type: i32,
     total: i32,
     pull_count: i32,
-    bar_chart_vec: Vec<BarChart>,
+    pie_chart: PieChart,
     detail: Vec<GachaStatisticsDataItem>,
 }
 
@@ -470,39 +439,17 @@ impl MainView {
         if self.gacha_statistic_view_vec.is_empty() {
             let mut gacha_statistic_view_vec = vec![];
             for (card_pool_type, gacha_statistics_data) in gacha_statistic.iter() {
-                let mut bar_chart_vec = vec![];
-                let bar = Bar::new(1f64, gacha_statistics_data.three_count as f64)
-                    .width(0.95)
-                    .fill(Color32::from_rgb(129, 206, 255))
-                    .stroke(Stroke::new(1.5, Color32::from_rgb(99, 176, 225)));
-                let bar_chart = BarChart::new(vec![bar])
-                    .name("3星")
-                    .color(Color32::from_rgb(129, 206, 255));
-                bar_chart_vec.push(bar_chart);
-
-                let bar = Bar::new(2f64, gacha_statistics_data.four_count as f64)
-                    .width(0.95)
-                    .fill(Color32::from_rgb(201, 131, 237))
-                    .stroke(Stroke::new(1.5, Color32::from_rgb(171, 101, 207)));
-                let bar_chart = BarChart::new(vec![bar])
-                    .name("4星")
-                    .color(Color32::from_rgb(201, 131, 237));
-                bar_chart_vec.push(bar_chart);
-
-                let bar = Bar::new(3f64, gacha_statistics_data.five_count as f64)
-                    .width(0.95)
-                    .fill(Color32::from_rgb(255, 246, 145))
-                    .stroke(Stroke::new(1.5, Color32::from_rgb(225, 216, 115)));
-                let bar_chart = BarChart::new(vec![bar])
-                    .name("5星")
-                    .color(Color32::from_rgb(255, 246, 145));
-                bar_chart_vec.push(bar_chart);
+                let pie_chart = PieChart::new(gacha_statistics_data.card_pool_type.to_string(), vec![
+                            (gacha_statistics_data.three_count as f64, "3星".to_string(), Color32::from_rgb(99, 176, 225)),
+                            (gacha_statistics_data.four_count as f64, "4星".to_string(), Color32::from_rgb(171, 101, 207)),
+                            (gacha_statistics_data.five_count as f64, "5星".to_string(), Color32::from_rgb(225, 216, 115)),
+                            ]);
 
                 let gacha_statistic_view = GachaStatisticsView {
                     card_pool_type: *card_pool_type,
                     total: gacha_statistics_data.total,
                     pull_count: gacha_statistics_data.pull_count,
-                    bar_chart_vec,
+                    pie_chart,
                     detail: gacha_statistics_data.detail.clone(),
                 };
 

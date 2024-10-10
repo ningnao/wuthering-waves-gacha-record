@@ -14,8 +14,7 @@ use crate::view::main_view::MainView;
 
 mod core;
 mod view;
-/// TODO LIST
-///  - 优化页面展示
+mod widgets;
 
 pub(crate) const VERSION: &str = env!("CARGO_PKG_VERSION");
 
