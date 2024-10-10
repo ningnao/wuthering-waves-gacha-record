@@ -1,23 +1,28 @@
+use crate::core::message::MessageType;
+use crate::core::message::MessageType::{
+    CheckUpdate, DownloadFile, Gacha, NeedUpdate, Normal, Player, UpdateData, Warning,
+};
+use crate::core::statistics::{
+    gacha_statistics_from_cache, GachaStatistics, GachaStatisticsDataItem,
+};
+use crate::core::update::{check_update, download_file, Release};
+use crate::core::util::get_player_id_vec;
+use crate::gacha_statistics;
+use crate::widgets::pie_chart::PieChart;
+use eframe::glow::Context;
+use egui::FontFamily::{Monospace, Proportional};
+use egui::{CentralPanel, Color32, ComboBox, FontData, FontId, TextStyle, Visuals};
+use serde::{Deserialize, Serialize};
 use std::cmp::min;
+use std::collections::BTreeMap;
 use std::fs;
 use std::fs::OpenOptions;
 use std::io::Write;
-use std::sync::{Arc, mpsc};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender};
+use std::sync::{mpsc, Arc};
 use std::time::Duration;
-use eframe::glow::Context;
-use crate::gacha_statistics;
-use crate::widgets::pie_chart::PieChart;
-use egui::{CentralPanel, Color32, ComboBox, FontData, FontId, TextStyle, Visuals};
-use egui::FontFamily::{Monospace, Proportional};
-use serde::{Deserialize, Serialize};
 use tracing::{error, info, warn};
-use crate::core::message::MessageType;
-use crate::core::message::MessageType::{CheckUpdate, DownloadFile, Gacha, NeedUpdate, Normal, Player, UpdateData, Warning};
-use crate::core::statistics::{gacha_statistics_from_cache, GachaStatistics, GachaStatisticsDataItem};
-use crate::core::update::{check_update, download_file, Release};
-use crate::core::util::get_player_id_vec;
 
 #[derive(Serialize, Deserialize)]
 struct Config {
@@ -99,40 +104,46 @@ impl MainView {
 }
 
 fn setup_custom_style(ctx: &egui::Context, dark_mode: bool) {
-    // Start with the default fonts (we will be adding to them rather than replacing them).
     let mut fonts = egui::FontDefinitions::default();
 
     // 使用 得意黑 作为 UI 字体
-    fonts.font_data.insert("SmileySans".to_owned(), FontData::from_static(include_bytes!("../resource/fonts/SmileySans-Oblique.otf")));
-    // Install my own font (maybe supporting non-latin characters).
-    // .ttf and .otf files supported.
-    fonts.families.get_mut(&Proportional).unwrap().insert(0, "SmileySans".to_owned());
+    fonts.font_data.insert(
+        "SmileySans".to_owned(),
+        FontData::from_static(include_bytes!("../resource/fonts/SmileySans-Oblique.otf")),
+    );
+    fonts
+        .families
+        .get_mut(&Proportional)
+        .unwrap()
+        .insert(0, "SmileySans".to_owned());
 
-    // Tell egui to use these fonts:
     ctx.set_fonts(fonts);
 
     // 设置字体默认样式
-    let mut style = (*ctx.style()).clone();
-    style.text_styles = [
+    let text_styles: BTreeMap<TextStyle, FontId> = [
         (TextStyle::Heading, FontId::new(25.0, Proportional)),
         (TextStyle::Body, FontId::new(16.0, Proportional)),
         (TextStyle::Monospace, FontId::new(12.0, Monospace)),
         (TextStyle::Button, FontId::new(16.0, Proportional)),
         (TextStyle::Small, FontId::new(8.0, Proportional)),
-    ].into();
+    ]
+    .into();
 
-    if dark_mode {
-        style.visuals = Visuals::dark();
-    } else {
-        style.visuals = Visuals::light();
-    }
-
-    ctx.set_style(style);
+    ctx.all_styles_mut(move |style| {
+        if dark_mode {
+            style.visuals = Visuals::dark();
+        } else {
+            style.visuals = Visuals::light();
+        }
+        style.text_styles = text_styles.clone()
+    });
 }
 
-fn start_data_flush_thread(on_exit_flag_clone: Arc<AtomicBool>,
-                           service_tx: Sender<MessageType>,
-                           service_rx: Receiver<MessageType>) {
+fn start_data_flush_thread(
+    on_exit_flag_clone: Arc<AtomicBool>,
+    service_tx: Sender<MessageType>,
+    service_rx: Receiver<MessageType>,
+) {
     tokio::spawn(async move {
         loop {
             if on_exit_flag_clone.load(Ordering::Relaxed) {
@@ -177,20 +188,26 @@ fn start_data_flush_thread(on_exit_flag_clone: Arc<AtomicBool>,
                                     // 第一次加载时尝试读缓存文件中的统计内容，加快首屏加载速度
                                     match gacha_statistics_from_cache(player_id.clone()) {
                                         Ok(gacha_statistics_data) => {
-                                            let _ = service_tx.send(Gacha((player_id, gacha_statistics_data)));
-                                            let _ = service_tx.send(Normal("当前展示的是该用户最后一次获取的数据".to_string()));
+                                            let _ = service_tx
+                                                .send(Gacha((player_id, gacha_statistics_data)));
+                                            let _ = service_tx.send(Normal(
+                                                "当前展示的是该用户最后一次获取的数据".to_string(),
+                                            ));
                                             info!("刷新统计图");
                                             continue;
                                         }
                                         Err(err) => {
-                                            let _ = service_tx.send(Warning("无缓存，正在尝试从服务器获取".to_string()));
+                                            let _ = service_tx.send(Warning(
+                                                "无缓存，正在尝试从服务器获取".to_string(),
+                                            ));
                                             info!("无缓存：{}", err);
                                         }
                                     }
                                 }
                             }
 
-                            let _ = service_tx.send(Warning("首次使用，正在尝试从服务器获取".to_string()));
+                            let _ = service_tx
+                                .send(Warning("首次使用，正在尝试从服务器获取".to_string()));
                         }
 
                         // 从服务器获取抽卡数据
@@ -206,7 +223,8 @@ fn start_data_flush_thread(on_exit_flag_clone: Arc<AtomicBool>,
                                 }
                             }
                             Err(err) => {
-                                let _ = service_tx.send(Warning(format!("抽卡数据统计失败，失败原因：{}", err)));
+                                let _ = service_tx
+                                    .send(Warning(format!("抽卡数据统计失败，失败原因：{}", err)));
                                 error!("抽卡数据统计失败：{}", err);
                             }
                         }
@@ -285,7 +303,9 @@ impl eframe::App for MainView {
                 let update_button = ui.button("获取数据更新");
                 if update_button.clicked() {
                     info!("开始刷新数据...");
-                    let _ = &self.view_tx.send(UpdateData(false, self.player_id_selected.clone()));
+                    let _ = &self
+                        .view_tx
+                        .send(UpdateData(false, self.player_id_selected.clone()));
                     let _ = &self.gacha_statistic_view_vec.clear();
                 }
 
@@ -293,19 +313,24 @@ impl eframe::App for MainView {
                 if self.player_id_last_selected.ne(&self.player_id_selected) {
                     // 刷新数据
                     self.player_id_last_selected = self.player_id_selected.clone();
-                    let _ = &self.view_tx.send(UpdateData(true, self.player_id_selected.clone()));
+                    let _ = &self
+                        .view_tx
+                        .send(UpdateData(true, self.player_id_selected.clone()));
                     let _ = self.gacha_statistic_view_vec.clear();
                 }
 
                 ui.label("选择用户:");
-                ComboBox::from_id_source("player_id")
+                ComboBox::from_id_salt("player_id")
                     .selected_text(&self.player_id_selected)
                     .show_ui(ui, |ui| {
                         for player_id in self.player_id_vec.clone() {
-                            ui.selectable_value(&mut self.player_id_selected, player_id.clone(), player_id);
+                            ui.selectable_value(
+                                &mut self.player_id_selected,
+                                player_id.clone(),
+                                player_id,
+                            );
                         }
-                    },
-                    );
+                    });
 
                 let add_user_button = ui.button("获取新用户");
                 if add_user_button.clicked() {
@@ -333,41 +358,66 @@ impl eframe::App for MainView {
                 let _ = &self.create_bar_chart(&self.gacha_statistics.clone());
                 let gacha_statistic_view_vec = &mut self.gacha_statistic_view_vec;
 
-                egui::ScrollArea::vertical().drag_to_scroll(false).show(ui, |ui| {
-                    for _ in 0..(gacha_statistic_view_vec.len() as f32 / 3.0).ceil() as i32 {
-                        ui.vertical(|ui| {
-                            ui.horizontal(|ui| {
-                                ui.group(|ui| {
-                                    for _ in 0..min(3, gacha_statistic_view_vec.len() as i32) {
-                                        let mut item = gacha_statistic_view_vec.remove(0);
-                                        ui.vertical(|ui| {
-                                            match item.card_pool_type {
-                                                1 => { ui.label("角色活动唤取"); }
-                                                2 => { ui.label("武器活动唤取"); }
-                                                3 => { ui.label("角色常驻唤取"); }
-                                                4 => { ui.label("武器常驻唤取"); }
-                                                5 => { ui.label("新手唤取"); }
-                                                6 => { ui.label("新手自选唤取"); }
-                                                7 => { ui.label("新手自选唤取（感恩定向唤取）"); }
-                                                _ => { ui.label("新卡池"); }
-                                            }
-                                            item.pie_chart.show(ui);
-
-                                            ui.label(format!("当前累计[{}]抽，已垫[{}]抽，5星[{}]个",
-                                                             item.total, item.pull_count, item.detail.len()));
-                                            ui.horizontal_wrapped(|ui| {
-                                                ui.set_max_width(285.0);
-                                                for item in item.detail {
-                                                    ui.label(format!("{}[{}]", item.name, item.count));
+                egui::ScrollArea::vertical()
+                    .drag_to_scroll(false)
+                    .show(ui, |ui| {
+                        for _ in 0..(gacha_statistic_view_vec.len() as f32 / 3.0).ceil() as i32 {
+                            ui.vertical(|ui| {
+                                ui.horizontal(|ui| {
+                                    ui.group(|ui| {
+                                        for _ in 0..min(3, gacha_statistic_view_vec.len() as i32) {
+                                            let mut item = gacha_statistic_view_vec.remove(0);
+                                            ui.vertical(|ui| {
+                                                match item.card_pool_type {
+                                                    1 => {
+                                                        ui.label("角色活动唤取");
+                                                    }
+                                                    2 => {
+                                                        ui.label("武器活动唤取");
+                                                    }
+                                                    3 => {
+                                                        ui.label("角色常驻唤取");
+                                                    }
+                                                    4 => {
+                                                        ui.label("武器常驻唤取");
+                                                    }
+                                                    5 => {
+                                                        ui.label("新手唤取");
+                                                    }
+                                                    6 => {
+                                                        ui.label("新手自选唤取");
+                                                    }
+                                                    7 => {
+                                                        ui.label("新手自选唤取（感恩定向唤取）");
+                                                    }
+                                                    _ => {
+                                                        ui.label("新卡池");
+                                                    }
                                                 }
+                                                item.pie_chart.show(ui);
+
+                                                ui.label(format!(
+                                                    "当前累计[{}]抽，已垫[{}]抽，5星[{}]个",
+                                                    item.total,
+                                                    item.pull_count,
+                                                    item.detail.len()
+                                                ));
+                                                ui.horizontal_wrapped(|ui| {
+                                                    ui.set_max_width(285.0);
+                                                    for item in item.detail {
+                                                        ui.label(format!(
+                                                            "{}[{}]",
+                                                            item.name, item.count
+                                                        ));
+                                                    }
+                                                });
                                             });
-                                        });
-                                    }
+                                        }
+                                    });
                                 });
                             });
-                        });
-                    }
-                });
+                        }
+                    });
             }
 
             if let View::Update = self.view {
@@ -383,10 +433,15 @@ impl eframe::App for MainView {
                             let download_button = ui.button("下载更新");
                             if download_button.clicked() {
                                 self.view = View::Update;
-                                if let Some(path) = rfd::FileDialog::new().set_title("请选择更新包存放位置").pick_folder() {
+                                if let Some(path) = rfd::FileDialog::new()
+                                    .set_title("请选择更新包存放位置")
+                                    .pick_folder()
+                                {
                                     let picked_path = path.display().to_string();
                                     info!("选择的文件 {:?}", picked_path);
-                                    let _ = &self.view_tx.send(DownloadFile(update_info.clone(), picked_path));
+                                    let _ = &self
+                                        .view_tx
+                                        .send(DownloadFile(update_info.clone(), picked_path));
                                 } else {
                                     self.message = Message {
                                         success: true,
@@ -416,10 +471,12 @@ impl eframe::App for MainView {
             dark_mode: self.dark_mode,
             player_id_selected: self.player_id_selected.clone(),
         }) {
-            if let Ok(mut file) = OpenOptions::new().write(true)
+            if let Ok(mut file) = OpenOptions::new()
+                .write(true)
                 .truncate(true)
                 .create(true)
-                .open("./data/config.toml") {
+                .open("./data/config.toml")
+            {
                 let _ = file.write_all(config_str.as_bytes());
             }
         }
@@ -439,11 +496,26 @@ impl MainView {
         if self.gacha_statistic_view_vec.is_empty() {
             let mut gacha_statistic_view_vec = vec![];
             for (card_pool_type, gacha_statistics_data) in gacha_statistic.iter() {
-                let pie_chart = PieChart::new(gacha_statistics_data.card_pool_type.to_string(), vec![
-                            (gacha_statistics_data.three_count as f64, "3星".to_string(), Color32::from_rgb(99, 176, 225)),
-                            (gacha_statistics_data.four_count as f64, "4星".to_string(), Color32::from_rgb(171, 101, 207)),
-                            (gacha_statistics_data.five_count as f64, "5星".to_string(), Color32::from_rgb(225, 216, 115)),
-                            ]);
+                let pie_chart = PieChart::new(
+                    gacha_statistics_data.card_pool_type.to_string(),
+                    vec![
+                        (
+                            gacha_statistics_data.three_count as f64,
+                            "3星".to_string(),
+                            Color32::from_rgb(99, 176, 225),
+                        ),
+                        (
+                            gacha_statistics_data.four_count as f64,
+                            "4星".to_string(),
+                            Color32::from_rgb(171, 101, 207),
+                        ),
+                        (
+                            gacha_statistics_data.five_count as f64,
+                            "5星".to_string(),
+                            Color32::from_rgb(225, 216, 115),
+                        ),
+                    ],
+                );
 
                 let gacha_statistic_view = GachaStatisticsView {
                     card_pool_type: *card_pool_type,

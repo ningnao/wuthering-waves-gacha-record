@@ -2,7 +2,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use eframe::Renderer::Wgpu;
-use eframe::Theme;
 use time::macros::format_description;
 use tracing::level_filters::LevelFilter;
 use tracing::subscriber;
@@ -44,7 +43,6 @@ async fn main() -> eframe::Result {
             .with_inner_size([900.0, 520.0])
             .with_icon(icon),
         renderer: Wgpu,
-        default_theme: Theme::Light,
         centered: true,
         ..Default::default()
     };

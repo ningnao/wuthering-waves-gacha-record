@@ -18,7 +18,7 @@ pub(crate) fn get_wuthering_waves_progress_path() -> anyhow::Result<Vec<String>,
 
     let mut log_path = String::new();
     // TODO 优化
-    for process in system.processes_by_name("launcher.exe") {
+    for process in system.processes_by_name("launcher.exe".as_ref()) {
         if let Some(path) = process.exe() {
             if let Some(path) = path.parent() {
                 if let Some(path) = path.to_str() {
@@ -32,7 +32,7 @@ pub(crate) fn get_wuthering_waves_progress_path() -> anyhow::Result<Vec<String>,
     }
 
     if log_path.is_empty() {
-        for process in system.processes_by_name("Wuthering Waves.exe") {
+        for process in system.processes_by_name("Wuthering Waves.exe".as_ref()) {
             if let Some(path) = process.exe() {
                 if let Some(path) = path.parent() {
                     if let Some(path) = path.to_str() {

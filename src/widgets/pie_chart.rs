@@ -46,10 +46,7 @@ impl PieChart {
             })
             .collect();
 
-        Self {
-            name,
-            sectors,
-        }
+        Self { name, sectors }
     }
 
     pub fn show(&mut self, ui: &mut egui::Ui) {
@@ -58,7 +55,7 @@ impl PieChart {
         Plot::new(&self.name)
             .label_formatter(|_: &str, _: &PlotPoint| String::default())
             .show_background(false)
-            .legend(Legend::default())
+            .legend(Legend::default().hidden_items(vec![]))
             .show_axes([false, false])
             .show_grid(false)
             .allow_boxed_zoom(false)
@@ -91,7 +88,12 @@ impl PieChart {
                     plot_ui.polygon(
                         Polygon::new(PlotPoints::new(points))
                             .name(&name)
-                            .fill_color(Color32::from_rgba_premultiplied(color.r(), color.g(), color.b(), 200))
+                            .fill_color(Color32::from_rgba_premultiplied(
+                                color.r(),
+                                color.g(),
+                                color.b(),
+                                200,
+                            ))
                             .stroke(Stroke { width: 1.5, color })
                             .highlight(false),
                     );
