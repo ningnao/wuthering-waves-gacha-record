@@ -10,8 +10,9 @@ use crate::core::util::get_player_id_vec;
 use crate::gacha_statistics;
 use crate::widgets::pie_chart::PieChart;
 use eframe::glow::Context;
-use egui::FontFamily::{Monospace, Proportional};
+use egui::FontFamily::Proportional;
 use egui::{CentralPanel, Color32, ComboBox, FontData, FontId, TextStyle, Visuals};
+use egui_commonmark::{CommonMarkCache, CommonMarkViewer};
 use serde::{Deserialize, Serialize};
 use std::cmp::min;
 use std::collections::BTreeMap;
@@ -44,6 +45,8 @@ pub(crate) struct MainView {
     message: Message,
     update_info: Option<Release>,
     view: View,
+
+    markdown_cache: CommonMarkCache,
 }
 
 #[derive(Default)]
@@ -99,6 +102,7 @@ impl MainView {
             message: Message::default(),
             update_info: None,
             view: View::Home,
+            markdown_cache: CommonMarkCache::default(),
         }
     }
 }
@@ -111,6 +115,7 @@ fn setup_custom_style(ctx: &egui::Context, dark_mode: bool) {
         "SmileySans".to_owned(),
         FontData::from_static(include_bytes!("../resource/fonts/SmileySans-Oblique.otf")),
     );
+
     fonts
         .families
         .get_mut(&Proportional)
@@ -123,7 +128,7 @@ fn setup_custom_style(ctx: &egui::Context, dark_mode: bool) {
     let text_styles: BTreeMap<TextStyle, FontId> = [
         (TextStyle::Heading, FontId::new(25.0, Proportional)),
         (TextStyle::Body, FontId::new(16.0, Proportional)),
-        (TextStyle::Monospace, FontId::new(12.0, Monospace)),
+        (TextStyle::Monospace, FontId::new(16.0, Proportional)),
         (TextStyle::Button, FontId::new(16.0, Proportional)),
         (TextStyle::Small, FontId::new(8.0, Proportional)),
     ]
@@ -427,7 +432,11 @@ impl eframe::App for MainView {
                             ui.label(format!("发现新版本：{}", update_info.tag_name));
                             ui.label("");
                             ui.label("更新日志：");
-                            ui.label(&update_info.body);
+                            CommonMarkViewer::new().show(
+                                ui,
+                                &mut self.markdown_cache,
+                                update_info.body.as_str(),
+                            );
                             ui.label("");
 
                             let download_button = ui.button("下载更新");
