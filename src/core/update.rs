@@ -63,7 +63,7 @@ pub(crate) async fn download_file(release: Release, filepath: String, service_tx
 
     let mut stream = response.bytes_stream();
 
-    let limit = Ratelimiter::builder(1, Duration::from_millis(200)).build()?;
+    let limit = Ratelimiter::builder(1).period(Duration::from_millis(200)).build()?;
     while let Some(item) = stream.next().await {
         let chunk = item?;
         let len = chunk.len();

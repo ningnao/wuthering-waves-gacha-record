@@ -86,8 +86,7 @@ impl PieChart {
                     } = sector;
 
                     plot_ui.polygon(
-                        Polygon::new(PlotPoints::new(points))
-                            .name(&name)
+                        Polygon::new(&name, PlotPoints::new(points))
                             .fill_color(Color32::from_rgba_premultiplied(
                                 color.r(),
                                 color.g(),
@@ -106,8 +105,7 @@ impl PieChart {
                         let text = RichText::new(format!(" {}\n {}", name, number)).size(15.0);
 
                         plot_ui.text(
-                            Text::new(point, text)
-                                .name(&name)
+                            Text::new(&name, point, text)
                                 .anchor(Align2::LEFT_TOP)
                                 // 解决字体被填充颜色覆盖问题
                                 .highlight(true),

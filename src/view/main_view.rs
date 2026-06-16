@@ -9,9 +9,8 @@ use crate::core::update::{check_update, download_file, Release};
 use crate::core::util::get_player_id_vec;
 use crate::gacha_statistics;
 use crate::widgets::pie_chart::PieChart;
-use eframe::glow::Context;
 use egui::FontFamily::Proportional;
-use egui::{CentralPanel, Color32, ComboBox, FontData, FontId, TextStyle, Visuals};
+use egui::{CentralPanel, Color32, ComboBox, FontData, FontId, TextStyle, Ui};
 use egui_commonmark::{CommonMarkCache, CommonMarkViewer};
 use serde::{Deserialize, Serialize};
 use std::cmp::min;
@@ -23,6 +22,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{mpsc, Arc};
 use std::time::Duration;
+use eframe::Frame;
+use egui::scroll_area::ScrollSource;
+use egui_theme_switch::global_theme_switch;
 use tracing::{error, info, warn};
 
 #[derive(Serialize, Deserialize)]
@@ -107,13 +109,13 @@ impl MainView {
     }
 }
 
-fn setup_custom_style(ctx: &egui::Context, dark_mode: bool) {
+fn setup_custom_style(ctx: &egui::Context, _dark_mode: bool) {
     let mut fonts = egui::FontDefinitions::default();
 
     // 使用 得意黑 作为 UI 字体
     fonts.font_data.insert(
         "SmileySans".to_owned(),
-        FontData::from_static(include_bytes!("../resource/fonts/SmileySans-Oblique.otf")),
+        Arc::from(FontData::from_static(include_bytes!("../resource/fonts/SmileySans-Oblique.otf"))),
     );
 
     fonts
@@ -135,11 +137,6 @@ fn setup_custom_style(ctx: &egui::Context, dark_mode: bool) {
     .into();
 
     ctx.all_styles_mut(move |style| {
-        if dark_mode {
-            style.visuals = Visuals::dark();
-        } else {
-            style.visuals = Visuals::light();
-        }
         style.text_styles = text_styles.clone()
     });
 }
@@ -244,7 +241,10 @@ fn start_data_flush_thread(
 }
 
 impl eframe::App for MainView {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+    fn ui(&mut self, ui: &mut Ui, _frame: &mut Frame) {
+        // 定时刷新内容
+        ui.request_repaint_after(Duration::from_millis(100));
+
         if let Ok(message) = self.view_rx.try_recv() {
             match message {
                 Normal(message) => {
@@ -285,25 +285,10 @@ impl eframe::App for MainView {
             }
         }
 
-        CentralPanel::default().show(ctx, |ui| {
-            // 定时刷新内容
-            ctx.request_repaint_after(Duration::from_millis(100));
-
+        CentralPanel::default().show_inside(ui, |ui| {
             ui.horizontal(|ui| {
                 // 切换显示模式
-                let switch_style_button_text = if self.dark_mode { "🌙" } else { "☀" };
-                let switch_style_button = ui.button(switch_style_button_text);
-                if switch_style_button.clicked() {
-                    let mut style = (*ctx.style()).clone();
-                    if self.dark_mode {
-                        self.dark_mode = false;
-                        style.visuals = Visuals::light();
-                    } else {
-                        self.dark_mode = true;
-                        style.visuals = Visuals::dark();
-                    }
-                    ctx.set_style(style);
-                }
+                global_theme_switch(ui);
 
                 let update_button = ui.button("获取数据更新");
                 if update_button.clicked() {
@@ -364,7 +349,7 @@ impl eframe::App for MainView {
                 let gacha_statistic_view_vec = &mut self.gacha_statistic_view_vec;
 
                 egui::ScrollArea::vertical()
-                    .drag_to_scroll(false)
+                    .scroll_source(ScrollSource::MOUSE_WHEEL)
                     .show(ui, |ui| {
                         for _ in 0..(gacha_statistic_view_vec.len() as f32 / 3.0).ceil() as i32 {
                             ui.vertical(|ui| {
@@ -483,7 +468,7 @@ impl eframe::App for MainView {
         });
     }
 
-    fn on_exit(&mut self, _gl: Option<&Context>) {
+    fn on_exit(&mut self) {
         info!("应用退出...");
         self.on_exit.swap(true, Ordering::Relaxed);
         info!("储存用户配置...");
