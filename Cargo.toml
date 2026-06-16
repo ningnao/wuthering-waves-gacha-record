@@ -1,7 +1,7 @@
 [package]
 name = "wuthering-waves-gacha-record"
-version = "0.6.0"
-edition = "2021"
+version = "0.7.0"
+edition = "2024"
 build = "build.rs"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
