@@ -21,6 +21,7 @@ use std::io::Write;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{mpsc, Arc};
+use std::sync::mpsc::SendError;
 use std::time::Duration;
 use eframe::Frame;
 use egui::scroll_area::ScrollSource;
@@ -57,6 +58,22 @@ struct Message {
     message: String,
 }
 
+/// mpsc::Sender 包装，发送消息时刷新 UI
+#[derive(Clone)]
+pub struct UiRepaintSender {
+    pub sender: Sender<MessageType>,
+    pub ctx: egui::Context
+}
+
+impl UiRepaintSender {
+    pub fn send(&self, message: MessageType) -> Result<(), SendError<MessageType>> {
+        let result = self.sender.send(message);
+        // 刷新 UI
+        self.ctx.request_repaint();
+        result
+    }
+}
+
 enum View {
     Home,
     Update,
@@ -67,6 +84,11 @@ impl MainView {
         // 初始化数据处理线程
         // 服务发送 / 视图接收 通道
         let (service_tx, view_rx) = mpsc::channel();
+        let service_tx = UiRepaintSender {
+            sender: service_tx,
+            ctx: cc.egui_ctx.clone(),
+        };
+
         // 视图发送 / 服务接收 通道
         let (view_tx, service_rx) = mpsc::channel();
 
@@ -143,7 +165,7 @@ fn setup_custom_style(ctx: &egui::Context, _dark_mode: bool) {
 
 fn start_data_flush_thread(
     on_exit_flag_clone: Arc<AtomicBool>,
-    service_tx: Sender<MessageType>,
+    service_tx: UiRepaintSender,
     service_rx: Receiver<MessageType>,
 ) {
     tokio::spawn(async move {
@@ -242,9 +264,6 @@ fn start_data_flush_thread(
 
 impl eframe::App for MainView {
     fn ui(&mut self, ui: &mut Ui, _frame: &mut Frame) {
-        // 定时刷新内容
-        ui.request_repaint_after(Duration::from_millis(100));
-
         if let Ok(message) = self.view_rx.try_recv() {
             match message {
                 Normal(message) => {

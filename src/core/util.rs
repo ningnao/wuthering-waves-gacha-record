@@ -1,15 +1,14 @@
 use std::fs;
 use std::fs::OpenOptions;
 use std::io::{Read, Write};
-use std::sync::mpsc::Sender;
 use anyhow::Error;
 use regex::Regex;
 use sysinfo::System;
 use tracing::info;
 use url::Url;
 use crate::core::gacha::RequestParam;
-use crate::core::message::MessageType;
 use crate::core::message::MessageType::Normal;
+use crate::view::main_view::UiRepaintSender;
 
 pub(crate) fn get_wuthering_waves_progress_path() -> anyhow::Result<String, Error> {
     let mut system = System::new();
@@ -58,7 +57,7 @@ fn get_wuthering_waves_progress_path_test() {
     info!("{:?}", path);
 }
 
-pub(crate) fn get_param_from_logfile(player_id: String, server_sender: &Sender<MessageType>) -> Result<(bool, RequestParam), Error> {
+pub(crate) fn get_param_from_logfile(player_id: String, server_sender: &UiRepaintSender) -> Result<(bool, RequestParam), Error> {
     // 从配置文件中获取历史 url
     let _ = fs::create_dir_all(format!("./data/{}", player_id));
     if let Ok(mut file) = OpenOptions::new().read(true).open(format!("./data/{}/url_cache.txt", player_id)) {
@@ -131,7 +130,12 @@ pub(crate) fn get_param_from_logfile(player_id: String, server_sender: &Sender<M
 
 #[test]
 fn get_url_from_logfile_test() {
+    use egui::Context;
     let (tx, _) = std::sync::mpsc::channel();
+    let tx = UiRepaintSender {
+        sender: tx,
+        ctx: Context::default(),
+    };
 
     assert!(get_param_from_logfile("".to_string(), &tx).is_ok());
 }

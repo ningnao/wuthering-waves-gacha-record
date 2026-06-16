@@ -2,14 +2,13 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::fs::OpenOptions;
 use std::io::{Read, Write};
-use std::sync::mpsc::Sender;
 use anyhow::Error;
 use chrono::Local;
 use serde::{Deserialize, Serialize};
 use tracing::info;
-use crate::core::message::MessageType;
 use crate::core::message::MessageType::Normal;
 use crate::core::util;
+use crate::view::main_view::UiRepaintSender;
 
 // 接口统一返回值
 #[derive(Serialize, Deserialize, Debug)]
@@ -73,7 +72,7 @@ impl RequestParam {
     }
 }
 
-pub(crate) async fn get_gacha_data(player_id: String, server_sender: &Sender<MessageType>) -> Result<(String, SavedGachaData), Error> {
+pub(crate) async fn get_gacha_data(player_id: String, server_sender: &UiRepaintSender) -> Result<(String, SavedGachaData), Error> {
     // 从日志文件中获取抽卡记录 API 所需要的请求参数
     let (oversea, mut param) = util::get_param_from_logfile(player_id, server_sender)?;
 

@@ -1,4 +1,3 @@
-use std::sync::mpsc::Sender;
 use std::time::Duration;
 use anyhow::Error;
 use futures_util::stream::StreamExt;
@@ -6,9 +5,9 @@ use ratelimit::Ratelimiter;
 use serde::{Deserialize, Serialize};
 use tokio::io::AsyncWriteExt;
 
-use crate::core::message::MessageType;
 use crate::core::message::MessageType::Normal;
 use crate::VERSION;
+use crate::view::main_view::UiRepaintSender;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub(crate) struct Release {
@@ -46,7 +45,7 @@ pub(crate) async fn check_update() -> Result<Release, Error> {
     }
 }
 
-pub(crate) async fn download_file(release: Release, filepath: String, service_tx: Sender<MessageType>) -> Result<(), Error> {
+pub(crate) async fn download_file(release: Release, filepath: String, service_tx: UiRepaintSender) -> Result<(), Error> {
     let assets = release.assets.get(0).ok_or(Error::msg("获取更新包失败，请重试"))?;
 
     // 下载升级包

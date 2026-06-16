@@ -1,12 +1,11 @@
 use std::collections::BTreeMap;
 use std::fs::OpenOptions;
 use std::io::{Read, Write};
-use std::sync::mpsc::Sender;
 use anyhow::Error;
 use serde::{Deserialize, Serialize};
 use tracing::info;
 use crate::core::gacha::get_gacha_data;
-use crate::core::message::MessageType;
+use crate::view::main_view::UiRepaintSender;
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone, Default)]
 #[serde(rename_all = "camelCase")]
@@ -32,7 +31,7 @@ pub(crate) struct GachaStatisticsDataItem {
 
 pub(crate) type GachaStatistics = BTreeMap<i32, GachaStatisticsData>;
 
-pub(crate) async fn gacha_statistics(player_id: String, server_sender: &Sender<MessageType>) -> Result<(String, GachaStatistics), Error> {
+pub(crate) async fn gacha_statistics(player_id: String, server_sender: &UiRepaintSender) -> Result<(String, GachaStatistics), Error> {
     // 从服务获取抽卡数据
     let (player_id, gacha_data) = get_gacha_data(player_id, server_sender).await?;
 
