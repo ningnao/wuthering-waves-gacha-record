@@ -395,6 +395,18 @@ impl eframe::App for MainView {
                                                     7 => {
                                                         ui.label("新手自选唤取（感恩定向唤取）");
                                                     }
+                                                    8 => {
+                                                        ui.label("角色新旅唤取");
+                                                    }
+                                                    9 => {
+                                                        ui.label("武器新旅唤取");
+                                                    }
+                                                    10 => {
+                                                        ui.label("角色联动唤取");
+                                                    }
+                                                    11 => {
+                                                        ui.label("武器联动唤取");
+                                                    }
                                                     _ => {
                                                         ui.label("新卡池");
                                                     }

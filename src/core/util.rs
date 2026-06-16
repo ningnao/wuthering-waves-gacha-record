@@ -2,7 +2,6 @@ use std::fs;
 use std::fs::OpenOptions;
 use std::io::{Read, Write};
 use std::sync::mpsc::Sender;
-use std::time::SystemTime;
 use anyhow::Error;
 use regex::Regex;
 use sysinfo::System;
@@ -12,7 +11,7 @@ use crate::core::gacha::RequestParam;
 use crate::core::message::MessageType;
 use crate::core::message::MessageType::Normal;
 
-pub(crate) fn get_wuthering_waves_progress_path() -> anyhow::Result<Vec<String>, Error> {
+pub(crate) fn get_wuthering_waves_progress_path() -> anyhow::Result<String, Error> {
     let mut system = System::new();
     system.refresh_all();
 
@@ -47,35 +46,9 @@ pub(crate) fn get_wuthering_waves_progress_path() -> anyhow::Result<Vec<String>,
     }
 
     if log_path.is_empty() {
-        return Err(Error::msg("未找到游戏进程"));
+        Err(Error::msg("未找到游戏进程"))
     } else {
-        let mut path_metadata_vec = vec![];
-        let dir = fs::read_dir(&log_path)?;
-        for entry in dir.filter_map(Result::ok) {
-            if let Ok(metadata) = fs::metadata(entry.path()) {
-                if metadata.is_file() {
-                    let path = entry.path();
-                    let path = path.to_str().unwrap();
-                    path_metadata_vec.push((path.to_owned(), metadata.clone()));
-                }
-            }
-        }
-
-        // 按创建时间倒序排序
-        path_metadata_vec.sort_by(|(_, metadata_a), (_, metadata_b), | {
-            metadata_b
-                .modified()
-                .unwrap_or(SystemTime::UNIX_EPOCH)
-                .cmp(&metadata_a.modified().unwrap_or(SystemTime::UNIX_EPOCH))
-        });
-
-
-        let log_file_vec = path_metadata_vec
-            .iter()
-            .map(|(path, _)| { path.clone() })
-            .collect::<Vec<String>>();
-
-        Ok(log_file_vec)
+        Ok(format!(r#"{}\Client.log"#, log_path).to_string())
     }
 }
 
@@ -97,52 +70,61 @@ pub(crate) fn get_param_from_logfile(player_id: String, server_sender: &Sender<M
         }
     }
 
-    let logfile_path_vec = get_wuthering_waves_progress_path()?;
+    let logfile_path = get_wuthering_waves_progress_path()?;
 
-    for logfile_path in logfile_path_vec {
-        // 从路径中截取文件名称用于展示
-        let start_index = logfile_path.rfind("\\").unwrap_or_default() + 1;
-        let (_, filename) = logfile_path.split_at(start_index);
-        let _ = server_sender.send(Normal(format!("正在从日志文件中获取卡池地址：{}", filename)));
+    // 从路径中截取文件名称用于展示
+    let start_index = logfile_path.rfind("\\").unwrap_or_default() + 1;
+    let (_, filename) = logfile_path.split_at(start_index);
+    let _ = server_sender.send(Normal(format!("正在从日志文件中获取卡池地址：{}", filename)));
 
-        info!("解析到的日志：{}", filename);
-        let mut file = OpenOptions::new()
-            .read(true)
-            .open(logfile_path.clone())?;
+    info!("解析到的日志：{}", filename);
+    let mut file = OpenOptions::new()
+        .read(true)
+        .open(logfile_path.clone())?;
 
-        let mut buffer = String::new();
-        file.read_to_string(&mut buffer)?;
-
-        let regex = Regex::new(r#"https.*/aki/gacha/index.html#/record[?=&\w\-]+"#)?;
-        // TODO 性能优化
-        // 匹配最近打开的 Url
-        let mut url_vec = vec![];
-        for url in regex.find_iter(&*buffer) {
-            url_vec.push(url.as_str());
+    // 日志文件解密
+    let mut buffer = vec![];
+    file.read_to_end(&mut buffer)?;
+    buffer = buffer.iter().map(|item| {
+        if (item & 0x0F) % 2 == 1 {
+            item ^ 0xA5
+        } else {
+            item ^ 0xEF
         }
+    }).collect();
 
-        for url in url_vec.into_iter().rev() {
-            // 查找当前选择用户的抽卡 Url
-            if !url.contains(player_id.as_str()) {
-                info!("Url 与选择用户不匹配");
-                continue;
-            }
-            info!("获取到的卡池 Url：{}", url);
+    let buffer = String::from_utf8(buffer)?;
 
-            let (oversea, param) = get_request_param(url.to_string())?;
-
-            // 将获取到的抽卡页面 url 存入文件
-            let _ = fs::create_dir_all(format!("./data/{}", param.player_id));
-            let mut file = OpenOptions::new()
-                .write(true)
-                .create(true)
-                .truncate(true)
-                .open(format!("./data/{}/url_cache.txt", param.player_id))?;
-            file.write_all(url.as_bytes())?;
-
-            return Ok((oversea, param));
-        }
+    let regex = Regex::new(r#"https.*/aki/gacha/index.html#/record[?=&\w\-]+"#)?;
+    // TODO 性能优化
+    // 匹配最近打开的 Url
+    let mut url_vec = vec![];
+    for url in regex.find_iter(&buffer) {
+        url_vec.push(url.as_str());
     }
+
+    for url in url_vec.into_iter().rev() {
+        // 查找当前选择用户的抽卡 Url
+        if !url.contains(player_id.as_str()) {
+            info!("Url 与选择用户不匹配");
+            continue;
+        }
+        info!("获取到的卡池 Url：{}", url);
+
+        let (oversea, param) = get_request_param(url.to_string())?;
+
+        // 将获取到的抽卡页面 url 存入文件
+        let _ = fs::create_dir_all(format!("./data/{}", param.player_id));
+        let mut file = OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(format!("./data/{}/url_cache.txt", param.player_id))?;
+        file.write_all(url.as_bytes())?;
+
+        return Ok((oversea, param));
+    }
+
 
     Err(Error::msg("未打开过抽卡页面"))
 }

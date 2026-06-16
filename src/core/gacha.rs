@@ -49,7 +49,7 @@ pub(crate) type SavedGachaData = BTreeMap<i32, Vec<GachaData>>;
 pub(crate) struct RequestParam {
     // 同 resources_id
     card_pool_id: String,
-    // 卡池类型（写代码时范围为 1-7）
+    // 卡池类型（写代码时范围为 1-11）
     card_pool_type: i32,
     // 固定为 zh-Hans
     language_code: String,
@@ -105,7 +105,8 @@ pub(crate) async fn get_gacha_data(player_id: String, server_sender: &Sender<Mes
         "https://gmserver-api.aki-game2.com/gacha/record/query"
     };
 
-    for card_pool_type in 1..=7 {
+    // 当前卡池编号 1-11，提供对未来两个可能的新池子的兼容
+    for card_pool_type in 1..=13 {
         let _ = server_sender.send(Normal(format!("正在获取卡池 {} 的数据", card_pool_type)));
         param.card_pool_type = card_pool_type;
 
