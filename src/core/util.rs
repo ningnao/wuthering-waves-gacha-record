@@ -92,7 +92,7 @@ pub(crate) fn get_param_from_logfile(player_id: String, server_sender: &UiRepain
         }
     }).collect();
 
-    let buffer = String::from_utf8(buffer)?;
+    let buffer = String::from_utf8_lossy(&buffer);
 
     let regex = Regex::new(r#"https.*/aki/gacha/index.html#/record[?=&\w\-]+"#)?;
     // TODO 性能优化
