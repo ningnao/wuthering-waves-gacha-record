@@ -45,6 +45,29 @@ pub(crate) fn get_wuthering_waves_progress_path() -> anyhow::Result<String, Erro
     }
 
     if log_path.is_empty() {
+        for process in system.processes_by_name("Client-Win64-Shipping.exe".as_ref()) {
+            if let Some(path) = process.exe() {
+                // 需匹配 ...\Wuthering Waves Game\Client\Binaries\Win64\Client-Win64-Shipping.exe
+                let mut components = path.components().rev();
+                let matched = components.next().is_some_and(|item| item.as_os_str().eq_ignore_ascii_case("Client-Win64-Shipping.exe"))
+                    && components.next().is_some_and(|item| item.as_os_str().eq_ignore_ascii_case("Win64"))
+                    && components.next().is_some_and(|item| item.as_os_str().eq_ignore_ascii_case("Binaries"))
+                    && components.next().is_some_and(|item| item.as_os_str().eq_ignore_ascii_case("Client"))
+                    && components.next().is_some_and(|item| item.as_os_str().eq_ignore_ascii_case("Wuthering Waves Game"));
+                if matched {
+                    if let Some(path) = path.parent().and_then(|path| path.parent()).and_then(|path| path.parent()) {
+                        if let Some(path) = path.join(r#"Saved\Logs"#).to_str() {
+                            if fs::metadata(path).is_ok() {
+                                log_path = path.to_owned();
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if log_path.is_empty() {
         Err(Error::msg("未找到游戏进程"))
     } else {
         Ok(format!(r#"{}\Client.log"#, log_path).to_string())
